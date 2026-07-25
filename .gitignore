@@ -1,0 +1,18 @@
+# Saved login session — contains live X auth cookies; NEVER commit this
+sessions/
+
+# Generated report output + screenshots (top-level and any depth under reports/)
+reports/screenshots/
+reports/**/screenshots/
+reports/results.json
+reports/**/results.json
+reports/*.docx
+reports/**/*.docx
+reports/*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store

@@ -1,0 +1,9 @@
+# Report Automation — Python dependencies
+# Install everything (deps + browser) with:  python install.py
+#
+# Pinned to minimum tested versions; newer patch releases are fine.
+
+playwright>=1.40,<2.0     # headless browser automation (capture + login)
+reportlab>=4.0,<5.0       # builds the .pdf report
+python-docx>=1.1,<2.0     # builds the .docx report
+openpyxl>=3.1,<4.0        # reads the Excel (.xlsx) input list
