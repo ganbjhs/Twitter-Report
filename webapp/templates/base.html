@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Report Automation{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📄</text></svg>">
+</head>
+<body>
+{% if user %}
+<header class="topbar">
+  <a class="brand" href="/">
+    <span class="brand-mark">R</span>
+    <span>Report Automation</span>
+  </a>
+  <nav class="topbar-actions">
+    <a class="ghost" href="/admin/session-status">X login status</a>
+    <span class="who">{{ user }}</span>
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button class="ghost" type="submit">Sign out</button>
+    </form>
+  </nav>
+</header>
+{% endif %}
+
+<main class="{% block main_class %}wrap{% endblock %}">
+  {% block content %}{% endblock %}
+</main>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

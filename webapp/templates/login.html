@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Sign in — Report Automation{% endblock %}
+{% block main_class %}centered{% endblock %}
+
+{% block content %}
+<div class="card login-card">
+  <div class="login-head">
+    <span class="brand-mark big">R</span>
+    <h1>Report Automation</h1>
+    <p class="muted">Sign in to build X/Twitter and Influencer reports.</p>
+  </div>
+
+  {% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/login" class="stack" autocomplete="on">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <label class="field">
+      <span>Username</span>
+      <input name="username" type="text" required autofocus autocomplete="username">
+    </label>
+
+    <label class="field">
+      <span>Password</span>
+      <input name="password" type="password" required autocomplete="current-password">
+    </label>
+
+    <button class="primary" type="submit">Sign in</button>
+  </form>
+</div>
+{% endblock %}

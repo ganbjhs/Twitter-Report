@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}X login — Report Automation{% endblock %}
+
+{% block content %}
+<div class="page-head with-back">
+  <a class="back" href="/">← New report</a>
+  <h1>X login</h1>
+  <p class="muted">
+    Captures sign in to X with one shared capture account. Credentials live only
+    on the server and are never sent to the browser.
+  </p>
+</div>
+
+{% if flash %}
+<div class="alert {{ 'alert-ok' if flash.ok else 'alert-error' }}">
+  {{ flash.message }}
+</div>
+{% endif %}
+
+<section class="card">
+  {% if info.valid %}
+    <div class="alert alert-ok">
+      <strong>Signed in.</strong> Reports can capture posts and read engagement metrics.
+    </div>
+  {% elif info.auto_login %}
+    <div class="alert alert-warn">
+      <strong>No active session right now.</strong>
+      The server will sign in automatically when the next report starts, or you
+      can do it now with the button below.
+    </div>
+  {% else %}
+    <div class="alert alert-error">
+      <strong>No X login, and no account configured to sign in with.</strong>
+      Every capture will hit a login wall until this is fixed — see below.
+    </div>
+  {% endif %}
+
+  <dl class="facts">
+    <dt>Auto sign-in</dt>
+    <dd>
+      {% if info.auto_login %}
+        On — using <code>{{ info.account }}</code>
+        {%- if info.has_2fa_secret %} (with 2FA code){% endif %}
+      {% else %}
+        Off — <code>X_USERNAME</code> / <code>X_PASSWORD</code> are not set
+      {% endif %}
+    </dd>
+    <dt>Saved cookies</dt>
+    <dd>{{ info.cookies }}</dd>
+    {% if info.modified_text %}
+    <dt>Session saved</dt><dd>{{ info.modified_text }}</dd>
+    {% endif %}
+    {% if info.expires_in_days is not none %}
+    <dt>Expires in</dt><dd>{{ info.expires_in_days }} day(s)</dd>
+    {% endif %}
+    {% if info.last_attempt_text %}
+    <dt>Last sign-in attempt</dt>
+    <dd>{{ info.last_attempt_text }} — {{ info.last_attempt.message }}</dd>
+    {% endif %}
+  </dl>
+
+  {% if info.auto_login %}
+  <form method="post" action="/admin/x-login" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <button class="primary" type="submit">Sign in to X now</button>
+  </form>
+  <p class="muted small">
+    Takes about 15–30 seconds. Use this after changing the account's password, or
+    if reports start failing with login walls.
+  </p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2 class="card-title">How the login works</h2>
+  <p class="muted small">
+    This app runs on a host with an <strong>ephemeral disk</strong> — the saved
+    session file disappears whenever the server restarts. Rather than needing a
+    manual upload each time, the server signs in by itself.
+  </p>
+  <ol class="steps">
+    <li>
+      <strong>Set the account secrets once.</strong> In your Hugging Face Space:
+      <em>Settings → Variables and secrets</em>. Use a dedicated capture account,
+      never a personal one.
+      <pre><code>X_USERNAME   the @handle (without the @)
+X_PASSWORD   its password
+X_EMAIL      the account's email — X asks for it on unfamiliar logins
+X_TOTP_SECRET  only if 2FA is on (simpler: turn 2FA off on this account)</code></pre>
+    </li>
+    <li>
+      <strong>That's it.</strong> The server signs in at startup and again
+      whenever a report finds the session missing or rejected.
+    </li>
+    <li>
+      <strong>Optional fallback.</strong> You can still generate the file by hand
+      and place it at <code>{{ sessions_dir }}/x_state.json</code>:
+      <pre><code>python save_login.py x</code></pre>
+      On an ephemeral host this is lost on restart, so the secrets above are the
+      durable answer.
+    </li>
+  </ol>
+</section>
+{% endblock %}

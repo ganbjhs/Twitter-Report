@@ -1,0 +1,17 @@
+# Web app dependencies — SEPARATE from requirements.txt so the frozen CLI's
+# dependency set stays exactly as tested.
+#
+#   pip install -r requirements.txt -r requirements-web.txt
+#
+# (requirements.txt is still required: the web app invokes the CLI pipeline,
+# which needs playwright / reportlab / python-docx / openpyxl.)
+
+fastapi>=0.110,<1.0        # web framework
+uvicorn[standard]>=0.27,<1.0   # ASGI server
+jinja2>=3.1,<4.0           # server-rendered templates
+python-multipart>=0.0.9    # multipart/form-data (file uploads)
+itsdangerous>=2.1,<3.0     # signs the session cookie
+bcrypt>=4.1,<5.0           # password hashing (optional — plain creds also work)
+xlrd>=2.0,<3.0             # reads legacy .xls uploads (openpyxl cannot)
+pyotp>=2.9,<3.0          # generates 2FA codes for the shared X account (optional)
+Pillow>=10.0               # screenshot quality analysis + JPEG embed (already used by the CLI)

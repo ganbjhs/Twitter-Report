@@ -1,0 +1,19 @@
+# Free automatic HTTPS via Let's Encrypt.
+#
+# 1. Replace reports.example.com with your own domain or free subdomain, and
+#    point its DNS A record at the VM's public IP.
+# 2. Uncomment the caddy service in docker-compose.yml and remove the "ports"
+#    block from the web service.
+# 3. docker compose up -d
+#
+# Caddy obtains and renews the certificate on its own — nothing else to do.
+
+reports.example.com {
+	encode gzip
+	reverse_proxy web:8000
+
+	# Uploads are capped in the app too (MAX_UPLOAD_MB); this is the edge guard.
+	request_body {
+		max_size 10MB
+	}
+}

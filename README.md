@@ -1,3 +1,17 @@
+---
+title: Report Automation
+emoji: 📄
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Build X/Twitter and Influencer reports from a list of links
+---
+
+<!-- The YAML block above configures the Hugging Face Space (see DEPLOY.md).
+     It is ignored by GitHub and by every command below — the CLI is unchanged. -->
+
 # X (Twitter) Report Automation
 
 Give it a list of **X / Twitter post links** in an Excel sheet. For every link it

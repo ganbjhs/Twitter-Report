@@ -10,6 +10,15 @@ reports/*.docx
 reports/**/*.docx
 reports/*.pdf
 
+# Web app secrets — app logins + session signing key; NEVER commit this
+.env
+
+# Web app runtime state — per-job working dirs, uploads, outputs, jobs.db
+data/
+
+# Deployment secret mount — holds x_state.json (a live X login) on the server
+secrets/
+
 # Python
 __pycache__/
 *.py[cod]

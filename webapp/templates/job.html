@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ job.name }} — Report Automation{% endblock %}
+
+{% block content %}
+<div class="page-head with-back">
+  <a class="back" href="/">← New report</a>
+  <h1 id="job-title">{{ job.title }}</h1>
+  <p class="muted">
+    {{ 'Influencer' if job.report_type == 'influencer' else 'Twitter' }} report ·
+    {{ job.link_count }} link(s) · from {{ job.upload_name }}
+  </p>
+</div>
+
+<section class="card" id="status-card" data-job-id="{{ job.id }}" data-csrf="{{ csrf }}">
+  <div class="status-head">
+    <span class="status status-{{ job.status }}" id="status-pill">{{ job.status }}</span>
+    <span class="muted" id="elapsed"></span>
+  </div>
+
+  <p class="phase" id="phase">{{ job.phase }}</p>
+
+  <div class="progress" id="progress-wrap">
+    <div class="progress-bar" id="progress-bar" style="width:0%"></div>
+  </div>
+  <p class="muted small" id="counter"></p>
+
+  <div class="alert alert-error" id="job-error" hidden></div>
+
+  <div class="downloads" id="downloads" hidden>
+    <a class="primary as-button" id="dl-pdf" hidden>Download PDF</a>
+    <a class="secondary as-button" id="dl-docx" hidden>Download DOCX</a>
+    <a class="secondary as-button" id="dl-zip" hidden>Screenshots (.zip)</a>
+  </div>
+
+  <form id="cancel-form" hidden>
+    <button type="submit" class="ghost danger">Cancel this job</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2 class="card-title">Activity log</h2>
+  <ul class="activity" id="activity">
+    <li class="muted">Waiting for the job to start…</li>
+  </ul>
+</section>
+
+<section class="card" id="skipped-card" hidden>
+  <h2 class="card-title">Not included in the report <span id="skipped-count" class="count"></span></h2>
+  <p class="muted small">
+    These links could not be captured, so they were left out of the document.
+  </p>
+  <ul class="skipped" id="skipped"></ul>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/app.js"></script>
+<script>initJobPage({{ job.execution_mode | tojson }});</script>
+{% endblock %}

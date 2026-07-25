@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}New report — Report Automation{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>New report</h1>
+  <p class="muted">Upload your list of X/Twitter post links, name the report, pick a type.</p>
+</div>
+
+{% if not x_login_ok %}
+<div class="alert alert-warn">
+  <strong>No X login saved on the server.</strong>
+  Captures will hit login walls until an admin uploads <code>sessions/x_state.json</code>.
+  <a href="/admin/session-status">How to fix this</a>
+</div>
+{% endif %}
+
+<div class="grid">
+  <section class="card">
+    <form id="job-form" class="stack" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+
+      <div class="field">
+        <span class="label">Links file</span>
+        <label id="drop" class="dropzone" for="file-input">
+          <input id="file-input" type="file" name="file" accept="{{ accept }}" hidden>
+          <svg viewBox="0 0 24 24" class="drop-icon" aria-hidden="true">
+            <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
+          </svg>
+          <span class="drop-main">Drop a file here, or <u>browse</u></span>
+          <span class="drop-sub">.xlsx · .xls · .csv · .tsv · .txt — up to {{ max_mb }} MB, {{ max_links }} links</span>
+        </label>
+        <div id="file-chip" class="chip" hidden>
+          <span id="file-name"></span>
+          <button type="button" id="file-clear" aria-label="Remove file">×</button>
+        </div>
+      </div>
+
+      <label class="field">
+        <span class="label">Report / file name</span>
+        <input name="report_name" id="report-name" type="text" required
+               placeholder="Twitter Report" maxlength="80">
+        <span class="hint">Used for the document header and the download file name.</span>
+      </label>
+
+      <div class="field">
+        <span class="label">Report type</span>
+        <div class="choice-grid">
+          <label class="choice">
+            <input type="radio" name="report_type" value="twitter" checked>
+            <span class="choice-body">
+              <strong>Twitter Report</strong>
+              <small>Clean tweet screenshots with the engagement bar cropped out. One post per page, plus a links table.</small>
+            </span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="report_type" value="influencer">
+            <span class="choice-body">
+              <strong>Influencer Report</strong>
+              <small>Keeps likes &amp; reposts in the screenshot and adds a metrics table: Reactions, Comments, Reach, Shares.</small>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div id="form-error" class="alert alert-error" hidden></div>
+
+      <button class="primary" id="submit-btn" type="submit">
+        <span class="btn-label">Generate report</span>
+        <span class="spinner" hidden></span>
+      </button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2 class="card-title">Recent reports</h2>
+    {% if jobs %}
+    <ul class="job-list" id="job-list">
+      {% for j in jobs %}
+      <li>
+        <a href="/jobs/{{ j.id }}" class="job-row">
+          <span class="job-main">
+            <strong>{{ j.name }}</strong>
+            <small>{{ 'Influencer' if j.report_type == 'influencer' else 'Twitter' }} · {{ j.link_count }} link(s)</small>
+          </span>
+          <span class="status status-{{ j.status }}">{{ j.status }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted empty">No reports yet. Your finished reports will appear here.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/app.js"></script>
+<script>initSubmitForm();</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} — Report Automation{% endblock %}
+{% block main_class %}centered{% endblock %}
+
+{% block content %}
+<div class="card login-card">
+  <h1 class="error-code">{{ code }}</h1>
+  <p class="muted">{{ detail }}</p>
+  <a class="primary as-button" href="/">Back to the app</a>
+</div>
+{% endblock %}

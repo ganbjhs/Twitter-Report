@@ -1,0 +1,15 @@
+# Never bake secrets, runtime state or local junk into the image.
+.env
+.git
+.venv
+venv
+data/
+secrets/
+sessions/
+reports/
+config/
+**/__pycache__/
+*.py[cod]
+.DS_Store
+*.md
+!README.md

@@ -1,0 +1,57 @@
+# Always-on deployment (Oracle Cloud "Always Free" VM, or any Linux box).
+#
+#   docker compose up -d --build
+#
+# The web service also runs the capture worker pool in-process, so there is no
+# separate worker container to keep alive and no broker to run. Concurrency (and
+# therefore RAM) is controlled by MAX_CONCURRENT_JOBS x CAPTURE_WORKERS in .env.
+
+services:
+  web:
+    build: .
+    image: report-automation:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "7860"
+    ports:
+      # Serving plain HTTP directly. If you enable the caddy service below,
+      # delete this block so only Caddy is exposed to the internet.
+      - "8000:7860"
+    volumes:
+      # Unlike Hugging Face, a VM has a real disk: mount volumes over the
+      # image's ephemeral paths so jobs and the X session survive a restart.
+      - jobdata:/app/data
+      - xsession:/app/sessions
+    # Chromium needs more than Docker's default 64 MB of shared memory or tabs
+    # crash on media-heavy posts.
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:7860/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Free automatic HTTPS. Uncomment, put your domain in Caddyfile, remove the
+  # "ports" block from web above, then: docker compose up -d
+  # ---------------------------------------------------------------------------
+  # caddy:
+  #   image: caddy:2-alpine
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddydata:/data
+  #     - caddyconfig:/config
+  #   depends_on:
+  #     - web
+
+volumes:
+  jobdata:
+  xsession:
+  # caddydata:
+  # caddyconfig:
