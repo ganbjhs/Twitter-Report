@@ -42,6 +42,56 @@ def describe() -> str:
     return f"remote browser via CDP ({url})"
 
 
+# X switches its left navigation from icons to icons+labels at a 1280 px
+# breakpoint. Sitting exactly ON that breakpoint is unsafe: a remote browser
+# reserves room for a scrollbar, so the usable width lands just under 1280 while
+# JS still renders the labels — the nav then paints ON TOP of the tweet column
+# and ends up inside the article's bounding box, so it lands in the screenshot.
+# Anything comfortably past the breakpoint lays out correctly.
+MIN_REMOTE_VIEWPORT_WIDTH = 1500
+
+
+def _widen_viewport(kwargs: dict) -> dict:
+    viewport = kwargs.get("viewport")
+    if not isinstance(viewport, dict):
+        return kwargs
+    width = viewport.get("width") or 0
+    if width >= MIN_REMOTE_VIEWPORT_WIDTH:
+        return kwargs
+    kwargs = dict(kwargs)
+    kwargs["viewport"] = {**viewport, "width": MIN_REMOTE_VIEWPORT_WIDTH}
+    return kwargs
+
+
+class _RemoteContext:
+    """Wraps a CDP browser context so every page really gets the viewport.
+
+    `new_context(viewport=…)` is not honoured over a CDP connection: Playwright
+    reports the size you asked for, but `window.innerWidth` stays at the remote
+    service's default (800 px was observed). X then lays out in its narrow mode,
+    paints the nav over the tweet column, and the article's bounding box is
+    computed in that wrong geometry — so the screenshot contains the nav and
+    clips the tweet. Forcing the size on the page issues the emulation override
+    that actually takes effect.
+    """
+
+    def __init__(self, context, viewport):
+        self._context = context
+        self._viewport = viewport
+
+    def new_page(self):
+        page = self._context.new_page()
+        if self._viewport:
+            try:
+                page.set_viewport_size(self._viewport)
+            except Exception:
+                pass
+        return page
+
+    def __getattr__(self, name):
+        return getattr(self._context, name)
+
+
 class _RemoteBrowser:
     """Thin proxy over a CDP-connected browser.
 
@@ -56,8 +106,10 @@ class _RemoteBrowser:
         self._browser = browser
 
     def new_context(self, **kwargs):
+        kwargs = _widen_viewport(kwargs)
+        viewport = kwargs.get("viewport")
         try:
-            return self._browser.new_context(**kwargs)
+            ctx = self._browser.new_context(**kwargs)
         except Exception:
             contexts = self._browser.contexts
             ctx = contexts[0] if contexts else self._browser.new_context()
@@ -68,7 +120,7 @@ class _RemoteBrowser:
                     ctx.add_cookies(cookies)
                 except Exception:
                     pass
-            return ctx
+        return _RemoteContext(ctx, viewport)
 
     def close(self):
         # Closing the CDP connection ends the remote session, which is what
@@ -82,10 +134,46 @@ class _RemoteBrowser:
         return getattr(self._browser, name)
 
 
+def _remote_endpoint_with_window() -> str:
+    """Ask the remote service to launch its browser at a usable window size.
+
+    Emulating a viewport is not enough on a CDP connection: the real browser
+    window stays whatever the service launched, and X measures the *window* when
+    it lays out. If that window is small, X renders the nav labels over the tweet
+    column, and the nav then sits inside the article's box and lands in the
+    screenshot. Browserless accepts a `launch` query parameter for this.
+    """
+    import json
+    import urllib.parse
+
+    url = endpoint()
+
+    # Use the CHROME build, not Chromium. The default endpoint serves the
+    # open-source Chromium, which has no H.264/AAC — and X's videos are H.264,
+    # so every video post renders as "The media could not be played" instead of
+    # a poster frame. Real Chrome ships those codecs.
+    head, sep, query = url.partition("?")
+    if not urllib.parse.urlparse(head).path.strip("/"):
+        head = head.rstrip("/") + "/chrome"
+        url = head + sep + query
+
+    if "launch=" in url:
+        return url                      # caller configured it themselves
+    # `defaultViewport` is the one that actually counts: the service applies its
+    # own (800x600 was observed) and that wins over both `new_context(viewport=)`
+    # and `page.set_viewport_size()`, leaving window.innerWidth at 800 no matter
+    # what Playwright reports.
+    launch = urllib.parse.quote(json.dumps({
+        "args": [f"--window-size={MIN_REMOTE_VIEWPORT_WIDTH},1600"],
+        "defaultViewport": {"width": MIN_REMOTE_VIEWPORT_WIDTH, "height": 1600},
+    }))
+    return f"{url}{'&' if '?' in url else '?'}launch={launch}"
+
+
 def launch_browser(playwright, headless: bool = True, **launch_kwargs):
     """Return a Browser, local or remote depending on the environment."""
     if is_remote():
         remote = playwright.chromium.connect_over_cdp(
-            endpoint(), timeout=_CONNECT_TIMEOUT_MS)
+            _remote_endpoint_with_window(), timeout=_CONNECT_TIMEOUT_MS)
         return _RemoteBrowser(remote)
     return playwright.chromium.launch(headless=headless, **launch_kwargs)
