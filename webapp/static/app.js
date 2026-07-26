@@ -106,6 +106,7 @@ function initJobPage(executionMode) {
   const skippedCard = document.getElementById("skipped-card");
   const skippedList = document.getElementById("skipped");
   const skippedCount = document.getElementById("skipped-count");
+  const ephemeralNote = document.getElementById("ephemeral-note");
 
   const fmtTime = (s) => {
     const m = Math.floor(s / 60);
@@ -172,12 +173,15 @@ function initJobPage(executionMode) {
     renderSkipped(job.skipped || []);
 
     const has = (k) => (job.artifacts || []).includes(k);
-    downloads.hidden = !(job.artifacts || []).length;
+    const hasAny = (job.artifacts || []).length > 0;
+    downloads.hidden = !hasAny;
     for (const kind of ["pdf", "docx", "zip"]) {
       const el = document.getElementById(`dl-${kind}`);
       el.hidden = !has(kind);
       if (has(kind)) el.href = `/api/jobs/${jobId}/download/${kind}`;
     }
+    // Scale-to-zero hosts throw the files away when the instance stops.
+    ephemeralNote.hidden = !(hasAny && job.execution_mode === "inline");
 
     cancelForm.hidden = job.finished;
     document.title = `${job.status} · ${job.name} — Report Automation`;
@@ -206,10 +210,38 @@ function initJobPage(executionMode) {
     setTimeout(poll, delay);
   };
 
-  // On a scale-to-zero host the container is frozen once the response is sent,
-  // so the capture must run inside a request we hold open.
+  // Inline mode (scale-to-zero hosts): the container is frozen once a response
+  // is sent, so the capture runs inside a request we hold open. That same
+  // response streams NDJSON status, which we render directly — polling would be
+  // unreliable here because another auto-scaled instance may not know this job.
+  const runInline = async () => {
+    const res = await fetch(`/api/jobs/${jobId}/run-inline`);
+    if (res.status === 409) return poll(); // already running (e.g. page reload)
+    if (!res.ok || !res.body) throw new Error(`stream failed (${res.status})`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop(); // keep the partial line for the next chunk
+      for (const line of lines) {
+        if (!line.trim()) continue; // keep-alive
+        try {
+          render(JSON.parse(line));
+        } catch (_) {
+          /* ignore a malformed frame rather than kill the stream */
+        }
+      }
+    }
+  };
+
   if (executionMode === "inline") {
-    fetch(`/api/jobs/${jobId}/run-inline`).catch(() => {});
+    runInline().catch(() => poll()); // network hiccup — fall back to polling
+  } else {
+    poll();
   }
-  poll();
 }

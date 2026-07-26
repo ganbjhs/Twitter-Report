@@ -17,6 +17,7 @@ def run_chunk(chunk, headless, storage_state, ctx_kwargs, src_path, inf_path):
         if p and p not in sys.path:
             sys.path.insert(0, p)
     from playwright.sync_api import sync_playwright
+    from browser_backend import launch_browser   # local Chromium, or remote CDP
     import inf_capture
 
     results = []
@@ -26,7 +27,7 @@ def run_chunk(chunk, headless, storage_state, ctx_kwargs, src_path, inf_path):
     followers_cache = {}
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
+        browser = launch_browser(p, headless)
         kwargs = dict(ctx_kwargs)
         if storage_state:
             kwargs["storage_state"] = storage_state

@@ -199,8 +199,9 @@ async def admin_x_login(request: Request, csrf_token: str = Form(""),
                          flash={"ok": ok, "message": message}))
 
 
-# Two names for the same check: /healthz for compose, /health for the uptime
-# pinger that keeps a sleeping Hugging Face Space awake.
+# Two names for the same check: /healthz is the conventional one, /health is
+# what compose's healthcheck and any external uptime monitor use. Neither
+# requires a login and neither does any work.
 @app.get("/healthz")
 @app.get("/health")
 async def healthz():

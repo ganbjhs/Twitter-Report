@@ -6,6 +6,7 @@ user-supplied string is ever used as a path.
 """
 import asyncio
 import datetime
+import json
 import time
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -155,11 +156,6 @@ async def submit_job(request: Request,
 # --------------------------------------------------------------------------- #
 # Status / cancel
 # --------------------------------------------------------------------------- #
-@router.get("/jobs")
-async def my_jobs(user: str = Depends(auth.require_user_api)):
-    return {"jobs": [public_job(j) for j in store.list_for(user, limit=25)]}
-
-
 @router.get("/jobs/{job_id}")
 async def job_status(job_id: str, user: str = Depends(auth.require_user_api)):
     return public_job(_owned_job(job_id, user))
@@ -192,29 +188,54 @@ async def run_inline(job_id: str, user: str = Depends(auth.require_user_api)):
                             detail=f"Job is already {job['status']}.")
 
     async def stream():
-        loop = asyncio.get_running_loop()
-        lines: asyncio.Queue = asyncio.Queue()
+        """Newline-delimited JSON, one full job status per line.
 
-        def on_line(text):
-            loop.call_soon_threadsafe(lines.put_nowait, text)
+        Deliberately carries the SAME shape as GET /api/jobs/{id} so the browser
+        renders from this stream and never has to poll. That matters on Cloud
+        Run: instances auto-scale and each has its own ephemeral SQLite, so a
+        poll can land on an instance that has never heard of this job and answer
+        404 while the capture is running perfectly on another one. The streaming
+        response is pinned to the instance doing the work, so it is the only
+        status source that is always right.
+        """
+        loop = asyncio.get_running_loop()
+        bump = asyncio.Event()
+
+        def on_line(_text):
+            loop.call_soon_threadsafe(bump.set)
 
         task = loop.run_in_executor(None, runner.run_job, job_id, on_line)
-        yield "starting\n"
+        last = None
         while True:
-            try:
-                text = await asyncio.wait_for(lines.get(), timeout=10)
-                yield text[:500] + "\n"
-            except asyncio.TimeoutError:
-                yield "\n"                    # keep-alive so the host sees traffic
-            if task.done() and lines.empty():
+            current = await asyncio.to_thread(store.get, job_id)
+            if current:
+                payload = json.dumps(public_job(current))
+                if payload != last:
+                    yield payload + "\n"
+                    last = payload
+            if task.done():
                 break
+            try:
+                await asyncio.wait_for(bump.wait(), timeout=2)
+                bump.clear()
+            except asyncio.TimeoutError:
+                yield "\n"          # keep-alive so proxies don't close the stream
+
         try:
             await task
         except Exception as e:
-            yield f"error: {e}\n"
-        yield "finished\n"
+            store.update(job_id, status="failed", phase="Failed",
+                         error=f"Internal error while running the job: {e}")
 
-    return StreamingResponse(stream(), media_type="text/plain")
+        final = await asyncio.to_thread(store.get, job_id)
+        if final:
+            yield json.dumps(public_job(final)) + "\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="application/x-ndjson",
+        # Buffering would defeat the point — no progress until the job ends.
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 
 # --------------------------------------------------------------------------- #

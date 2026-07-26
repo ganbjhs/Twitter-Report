@@ -71,7 +71,23 @@ def _parse_users(raw: str) -> dict:
     return users
 
 
-USERS = _parse_users(os.environ.get("APP_USERS", ""))
+def _load_users() -> dict:
+    """APP_USERS is the canonical form: 'alice:pw1,bob:pw2'.
+
+    APP_USER + APP_PASS is also accepted for a single account, because
+    `gcloud run deploy --set-env-vars` splits on commas — so a multi-user
+    APP_USERS needs the awkward '^@^' delimiter syntax, and a one-account deploy
+    is much easier to get right with two plain variables.
+    """
+    users = _parse_users(os.environ.get("APP_USERS", ""))
+    single_user = os.environ.get("APP_USER", "").strip()
+    single_pass = os.environ.get("APP_PASS", "").strip()
+    if single_user and single_pass:
+        users.setdefault(single_user, single_pass)
+    return users
+
+
+USERS = _load_users()
 
 # --------------------------------------------------------------------------- #
 # Shared X capture account — used to sign in headlessly and regenerate
@@ -87,9 +103,28 @@ SESSION_SECRET = os.environ.get("SESSION_SECRET", "").strip()
 SESSION_HOURS = _int("SESSION_HOURS", 12)
 COOKIE_SECURE = _bool("COOKIE_SECURE", False)
 
+# --------------------------------------------------------------------------- #
+# Browser backend — a local Chromium, or a remote one over CDP (Browserless).
+# The switch itself lives in src/browser_backend.py so the capture workers can
+# import it; these are only what the web layer needs to know.
+# --------------------------------------------------------------------------- #
+BROWSER_BACKEND = (os.environ.get("BROWSER_BACKEND", "") or "local").strip().lower()
+BROWSERLESS_WS = os.environ.get("BROWSERLESS_WS", "").strip()
+REMOTE_BROWSER = BROWSER_BACKEND == "browserless" and bool(BROWSERLESS_WS)
+# Free remote-browser plans allow very few simultaneous browsers. Exceeding it
+# does not queue — it errors — so the app clamps itself rather than failing.
+BROWSER_MAX_CONCURRENCY = max(1, _int("BROWSER_MAX_CONCURRENCY", 2))
+
 # Capture performance / memory
 MAX_CONCURRENT_JOBS = max(1, _int("MAX_CONCURRENT_JOBS", 1))
 CAPTURE_WORKERS = max(1, _int("CAPTURE_WORKERS", 4))
+
+if REMOTE_BROWSER:
+    # Total simultaneous browsers = jobs x workers-per-job. Keep that within
+    # the remote plan's ceiling, shrinking the per-job workers first.
+    MAX_CONCURRENT_JOBS = min(MAX_CONCURRENT_JOBS, BROWSER_MAX_CONCURRENCY)
+    CAPTURE_WORKERS = max(
+        1, min(CAPTURE_WORKERS, BROWSER_MAX_CONCURRENCY // MAX_CONCURRENT_JOBS))
 JOB_TIMEOUT_MINUTES = max(1, _int("JOB_TIMEOUT_MINUTES", 90))
 
 # Upload limits
@@ -124,8 +159,12 @@ def startup_warnings() -> list:
     """Misconfiguration the admin should see in the log at boot."""
     warn = []
     if not USERS:
-        warn.append("APP_USERS is empty — nobody can log in. Set it in .env "
-                    "(e.g. APP_USERS=admin:somepassword).")
+        warn.append("No app logins configured — nobody can log in. Set "
+                    "APP_USERS=admin:somepassword (or APP_USER + APP_PASS).")
+    if EXECUTION_MODE == "inline" and JOB_TIMEOUT_MINUTES >= 60:
+        warn.append(f"JOB_TIMEOUT_MINUTES={JOB_TIMEOUT_MINUTES} but a "
+                    "scale-to-zero host caps a request at 60 minutes — the "
+                    "host will cut the job off first. Use 50 or less.")
     if any(pw in ("change-me-now", "changeme", "password") for pw in USERS.values()):
         warn.append("APP_USERS still contains a default password — change it.")
     if not SESSION_SECRET or SESSION_SECRET.startswith("change-me"):
@@ -140,6 +179,10 @@ def startup_warnings() -> list:
     if X_TOTP_SECRET and not (X_USERNAME and X_PASSWORD):
         warn.append("X_TOTP_SECRET is set but X_USERNAME / X_PASSWORD are not — "
                     "auto sign-in is disabled.")
+    if BROWSER_BACKEND == "browserless" and not BROWSERLESS_WS:
+        warn.append("BROWSER_BACKEND=browserless but BROWSERLESS_WS is empty — "
+                    "falling back to a local Chromium, which needs far more RAM "
+                    "than a free host provides.")
     if EXECUTION_MODE not in ("queue", "inline"):
         warn.append(f"EXECUTION_MODE={EXECUTION_MODE!r} is not 'queue' or "
                     "'inline' — falling back to 'queue'.")
