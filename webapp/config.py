@@ -119,6 +119,17 @@ BROWSER_MAX_CONCURRENCY = max(1, _int("BROWSER_MAX_CONCURRENCY", 2))
 MAX_CONCURRENT_JOBS = max(1, _int("MAX_CONCURRENT_JOBS", 1))
 CAPTURE_WORKERS = max(1, _int("CAPTURE_WORKERS", 4))
 
+# The Influencer report runs single-browser by default, for two reasons:
+#   * it looks up each author's follower count once and caches it — but that
+#     cache lives in the worker PROCESS, so a second worker re-fetches the same
+#     profiles, which costs real browser time on a metered service;
+#   * one browser leaves headroom under a free plan's 2-concurrent limit instead
+#     of sitting exactly on it, which is what produced "Target page, context or
+#     browser has been closed" mid-run.
+# It is slower per report, and deliberately so. Raise it only on a host with a
+# local Chromium and spare cores.
+INFLUENCER_WORKERS = max(1, _int("INFLUENCER_WORKERS", 1))
+
 if REMOTE_BROWSER:
     # Total simultaneous browsers = jobs x workers-per-job. Keep that within
     # the remote plan's ceiling, shrinking the per-job workers first.

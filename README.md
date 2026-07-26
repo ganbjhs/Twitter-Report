@@ -3,6 +3,9 @@
 Give it a list of X/Twitter post links; it screenshots every post in a logged-in
 browser and builds a **PDF + Word (.docx)** report.
 
+> Changing or rebuilding this project? Read **[RULEBOOK.md](RULEBOOK.md)** first —
+> it collects the constraints and traps that are not obvious from the code.
+
 Two ways to use it:
 
 * **Web app** — colleagues sign in, upload a links file, pick a report type,
@@ -207,7 +210,8 @@ Everything is environment variables, loaded from `.env` locally. See
 |---|---|---|
 | `EXECUTION_MODE` | `queue` | `queue` = background workers; `inline` = capture runs inside the request (needed on hosts that sleep). |
 | `MAX_CONCURRENT_JOBS` | `1` | |
-| `CAPTURE_WORKERS` | `4` | Browsers per job. |
+| `CAPTURE_WORKERS` | `4` | Browsers per job (Twitter report). |
+| `INFLUENCER_WORKERS` | `1` | Browsers per job (Influencer report). Kept at 1 so the follower-count cache is shared and the browser plan's concurrency limit has headroom. |
 | `MAX_LINKS` | `200` | Per job. |
 | `MAX_UPLOAD_MB` | `5` | |
 | `JOB_TIMEOUT_MINUTES` | `90` | |

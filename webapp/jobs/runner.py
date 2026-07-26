@@ -121,12 +121,13 @@ def build_job_dir(job_id: str, rows: list, upload_bytes: bytes,
 # --------------------------------------------------------------------------- #
 def build_command(report_type: str, title: str, date: str) -> list:
     """The exact CLI invocation, identical in shape to what you run by hand."""
-    entry = "run.py" if report_type == "twitter" else str(
-        Path("influencer") / "run_influencer.py")
+    influencer = report_type != "twitter"
+    entry = str(Path("influencer") / "run_influencer.py") if influencer else "run.py"
+    workers = config.INFLUENCER_WORKERS if influencer else config.CAPTURE_WORKERS
     return [sys.executable, "-u", entry, "input.xlsx",
             "--title", title,
             "--date", date,
-            "--workers", str(config.CAPTURE_WORKERS)]
+            "--workers", str(workers)]
 
 
 # --------------------------------------------------------------------------- #
