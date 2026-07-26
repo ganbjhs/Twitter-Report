@@ -195,23 +195,28 @@ def parse_rows(path: Path, suffix: str) -> list:
 
 
 def write_canonical_xlsx(rows: list, dest: Path) -> None:
-    """Write rows as a Category | Account | Link sheet.
+    """Write rows as an Account | Link sheet.
 
     Those exact headers are recognised by `input_loader._header_index`, so the
     pipeline reads back precisely the rows we validated, in the same order.
+
+    NOTE — the category column is deliberately omitted. A sheet's category is
+    almost always a section word like "Tweet Links", and the Twitter report
+    prints it above every screenshot, which is just noise in the finished
+    document. `input_loader` defaults a missing category to "Uncategorized", and
+    the report builder only prints the label when some row has a real category —
+    so leaving the column out removes it from the document without touching the
+    frozen builder. (The Influencer report shows the account name instead.)
     """
     from openpyxl import Workbook
     wb = Workbook()
     ws = wb.active
     ws.title = "Links"
-    ws.append(["Category", "Account", "Link"])
+    ws.append(["Account", "Link"])
     for r in rows:
-        ws.append([r.get("category", "Uncategorized"),
-                   r.get("account_name", ""),
-                   r.get("link", "")])
-    ws.column_dimensions["A"].width = 24
-    ws.column_dimensions["B"].width = 28
-    ws.column_dimensions["C"].width = 70
+        ws.append([r.get("account_name", ""), r.get("link", "")])
+    ws.column_dimensions["A"].width = 28
+    ws.column_dimensions["B"].width = 70
     dest.parent.mkdir(parents=True, exist_ok=True)
     wb.save(dest)
 
