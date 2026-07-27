@@ -15,15 +15,26 @@ file explains *what will bite you*.
 `src/input_loader.py` and friends were tested in production before the web app
 existed. **Invoke them; do not rewrite them.**
 
-`src/` is currently **byte-for-byte identical to its originally tested state**.
-Confirm that before you ship anything:
+`src/` was **byte-for-byte identical to its originally tested state** until the
+reply-capture change (below). Everything else still is; check what you are about
+to touch:
 
 ```bash
-git diff <first-commit> -- run.py src/ install.py requirements.txt   # must be empty
+git diff <first-commit> -- run.py src/ install.py requirements.txt
+# expected: src/capture/x_capture.py only
 ```
 
 (A two-line change lived in `src/_worker.py` while the browser ran off-box. It
 was approved at the time and has since been reverted.)
+
+**The one approved edit: `src/capture/x_capture.py` shoots a reply together with
+its parent** — parent name/@handle + text + media, then the reply's text and
+media, engagement bars hidden throughout. This could not be done from outside:
+the crop is chosen inside the capture, and the frozen dispatcher hands it the
+page. Its blast radius is the frame only — the result dict, the runner and the
+builder are untouched, and a non-reply post still comes out exactly as before.
+`_THREAD_ANCESTORS` sets how far up the thread the frame reaches (1 = the
+parent). Everything the change relies on is written up in rule 6.
 
 Before you edit anything under `src/`, ask whether you can get the same result
 from outside it. You almost always can — see rules 2 and 8 for two cases where
@@ -114,12 +125,27 @@ page.evaluate("""() => document.createElement('video')
 ## 6. X's DOM: the four things that are not obvious
 
 1. **On a reply URL, the first `article` is the PARENT tweet.** Selecting
-   `.first` screenshots the wrong post. Score the articles instead: the focused
-   one has no `<time>` inside `[data-testid="User-Name"]` (ancestors do), and
-   its action bar reports view counts.
+   `.first` screenshots the wrong post. Two ways to find the right one, and the
+   difference matters:
+   * *By identity* — only the linked post's own article contains links carrying
+     its status id (timestamp, `/photo/1`, `/analytics`), so
+     `article:has(a[href*="/status/<id>"])` names it outright. Scroll it into
+     view first: **X unmounts off-screen articles**, and an unmounted post
+     cannot be found at all. In a long self-thread it drops out of the DOM
+     between one call and the next, which is exactly how a capture ends up
+     silently showing the parent alone.
+   * *By inference* — score the articles (the focused one has no `<time>` inside
+     `[data-testid="User-Name"]`, ancestors do; its action bar reports view
+     counts). Needed only for URLs with no readable status id, and it is the
+     path that guesses, so never trust a score that the id could have settled.
 2. **Engagement is `[role="group"]`.** Crop *above* its top for the Twitter
    report, *below* its bottom for the Influencer report. That one boundary is
    the entire difference between the two reports.
+   A parent's action bar sits *between* the parent and the reply, so when the
+   Twitter report shoots both in one frame no crop can remove it — it has to be
+   hidden (`display:none`) before the shot. Same for X's sticky "← Post" bar:
+   scroll a parent up to the viewport edge and that bar paints over its name
+   row, which is invisible in the code and obvious in the image.
 3. **Metrics live in an `aria-label`**, not in the visible text:
    `"12 replies, 3 reposts, 45 likes, 6 bookmarks, 7890 views"`. One parse gets
    everything; the per-button fallbacks are only for when that is missing.

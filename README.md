@@ -16,7 +16,7 @@ Two kinds of report:
 
 | | **Twitter Report** | **Influencer Report** |
 |---|---|---|
-| Screenshot | tweet with the engagement bar **cropped out** | keeps username, text, media **and** likes/reposts |
+| Screenshot | tweet with the engagement bar **cropped out**; a reply is shot together with its parent post | keeps username, text, media **and** likes/reposts |
 | Metrics | none | Followers, Reactions, Comments, Reach, Shares |
 | Layout | one post per page, letter | **two posts per page**, A4 |
 | Ends with | links table | links table |
