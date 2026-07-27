@@ -1,12 +1,13 @@
-# Free automatic HTTPS via Let's Encrypt.
+# Automatic HTTPS via Let's Encrypt, free and self-renewing.
 #
-# 1. Replace reports.example.com with your own domain or subdomain, and point
-#    its DNS A record at this server's public IP (Hostinger hPanel -> DNS).
-# 2. docker compose up -d
+# Configured for report.vedictech.in -> 200.97.175.12 (A record already set).
+# Caddy issues the certificate on first start; ports 80 and 443 must be open,
+# which they are. Nothing else to do.
 #
-# Caddy obtains and renews the certificate on its own — nothing else to do.
+# Changing domain? Edit the hostname below, point its DNS A record at this
+# server, and `docker compose up -d`.
 
-reports.example.com {
+report.vedictech.in {
 	encode gzip
 	reverse_proxy web:8000
 

@@ -233,10 +233,14 @@ ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw --force enable
 
 ### 2. Point a domain at it
 
-In Hostinger hPanel → DNS, add an **A record**:
-`reports.yourdomain.com → <VPS_IP>`.
+In Hostinger hPanel → DNS, add an **A record** pointing your subdomain at the
+server. For this deployment that is already done:
 
-You can skip this and use the bare IP at first — see step 5.
+```
+report.vedictech.in  →  200.97.175.12
+```
+
+`Caddyfile` is pre-configured for that hostname.
 
 ### 3. Get the code and configure it
 
@@ -270,9 +274,9 @@ scp sessions/x_state.json root@<VPS_IP>:~/app/sessions/x_state.json
 After that the server refreshes the cookie itself whenever it expires, using the
 `X_*` credentials. If you skip this step it will simply sign in on first use.
 
-### 5. Put your domain in Caddyfile, then start
+### 5. Start it
 
-Edit `Caddyfile` and replace `reports.example.com` with your domain. Then:
+The domain is already set in `Caddyfile`, so:
 
 ```bash
 docker compose up -d --build
@@ -285,7 +289,7 @@ docker compose ps            # expect "running (healthy)"
 docker compose logs -f web
 ```
 
-Open `https://reports.yourdomain.com` and sign in.
+Open <https://report.vedictech.in> and sign in.
 
 > **Testing on a bare IP instead?** Comment out the `caddy` service in
 > `docker-compose.yml`, change the web service's port line to `"8000:8000"`,
