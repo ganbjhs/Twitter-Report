@@ -1,0 +1,13 @@
+{# Brand mark — an original design, deliberately not derived from any platform
+   logo. A speech bubble (a post) containing a small bar chart (its metrics),
+   which is what this tool produces. Shared by the header and the login page;
+   size is set in CSS. #}
+<svg class="brand-mark{{ ' big' if big else '' }}" viewBox="0 0 32 32"
+     xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Report Automation">
+  <rect width="32" height="32" rx="8" fill="var(--accent)"/>
+  <rect x="6" y="8" width="20" height="14" rx="3.5" fill="#fff"/>
+  <path d="M10.5 20.5 L10.5 25.6 L15.6 20.5 Z" fill="#fff"/>
+  <rect x="10" y="15" width="2.8" height="4" rx="1.4" fill="var(--accent)"/>
+  <rect x="14.6" y="12.4" width="2.8" height="6.6" rx="1.4" fill="var(--accent)"/>
+  <rect x="19.2" y="13.8" width="2.8" height="5.2" rx="1.4" fill="var(--accent)"/>
+</svg>

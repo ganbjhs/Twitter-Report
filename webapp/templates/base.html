@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Report Automation{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📄</text></svg>">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 </head>
 <body>
 {% if user %}
 <header class="topbar">
   <a class="brand" href="/">
-    <span class="brand-mark">R</span>
+    {% include "_brand.svg" %}
     <span>Report Automation</span>
   </a>
   <nav class="topbar-actions">

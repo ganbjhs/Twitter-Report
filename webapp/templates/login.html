@@ -5,7 +5,7 @@
 {% block content %}
 <div class="card login-card">
   <div class="login-head">
-    <span class="brand-mark big">R</span>
+    {% with big = true %}{% include "_brand.svg" %}{% endwith %}
     <h1>Report Automation</h1>
     <p class="muted">Sign in to build X/Twitter and Influencer reports.</p>
   </div>
