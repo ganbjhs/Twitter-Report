@@ -1,0 +1,17 @@
+# Free automatic HTTPS via Let's Encrypt.
+#
+# 1. Replace reports.example.com with your own domain or subdomain, and point
+#    its DNS A record at this server's public IP (Hostinger hPanel -> DNS).
+# 2. docker compose up -d
+#
+# Caddy obtains and renews the certificate on its own — nothing else to do.
+
+reports.example.com {
+	encode gzip
+	reverse_proxy web:8000
+
+	# Uploads are capped in the app too (MAX_UPLOAD_MB); this is the edge guard.
+	request_body {
+		max_size 10MB
+	}
+}

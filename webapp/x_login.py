@@ -195,18 +195,11 @@ def _signed_in(ctx) -> bool:
 
 def _do_login(headless: bool = True):
     """Drive the browser through X's login. Returns (ok, message)."""
-    import sys as _sys
     from playwright.sync_api import sync_playwright
 
-    # src/ holds browser_backend.py; the web layer is not otherwise on that path.
-    if str(config.ROOT / "src") not in _sys.path:
-        _sys.path.insert(0, str(config.ROOT / "src"))
-    from browser_backend import launch_browser, describe as describe_backend
-
-    print(f"[x-login] signing in using {describe_backend()}", flush=True)
     with sync_playwright() as p:
-        browser = launch_browser(
-            p, headless,
+        browser = p.chromium.launch(
+            headless=headless,
             args=["--disable-blink-features=AutomationControlled",
                   "--no-sandbox", "--disable-dev-shm-usage"])
         ctx = browser.new_context(
@@ -310,14 +303,6 @@ def force_login():
         _last_attempt["ok"] = ok
         _last_attempt["message"] = message
         print(f"[x-login] {'ok' if ok else 'FAILED'} — {message}", flush=True)
-        if ok:
-            # Mirror it out so the next cold start reuses this session instead
-            # of paying for another sign-in.
-            try:
-                from . import x_state_store
-                x_state_store.save_from_file()
-            except Exception as e:
-                print(f"[x-login] could not mirror the session: {e}", flush=True)
         return ok, message
 
 
@@ -325,19 +310,12 @@ def ensure_session():
     """Make sure a usable X cookie exists, signing in only when needed.
 
     Safe to call before every job: it is a cheap file check unless the cookie is
-    actually missing or about to expire.
-
-    Order matters on a host with no disk: try the external store BEFORE signing
-    in, because a sign-in costs real browser minutes on a metered service and a
-    cold start would otherwise pay that price every single time.
+    actually missing or about to expire. The session file lives on the server's
+    own disk, so it survives restarts and only needs regenerating when X expires
+    it.
     """
     if session_is_valid():
         return True, "Existing X session is valid."
-
-    from . import x_state_store
-    if x_state_store.enabled() and x_state_store.load_into_file():
-        if session_is_valid():
-            return True, f"Restored the X session from {x_state_store.describe()}."
 
     if not credentials_configured():
         return False, ("No saved X login and no X account configured — captures "

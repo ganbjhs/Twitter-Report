@@ -15,9 +15,15 @@ file explains *what will bite you*.
 `src/input_loader.py` and friends were tested in production before the web app
 existed. **Invoke them; do not rewrite them.**
 
-There is exactly one edit in the whole of `src/`, and it was explicitly
-approved: two lines in `src/_worker.py` swapping `p.chromium.launch(...)` for
-`launch_browser(p, headless)`.
+`src/` is currently **byte-for-byte identical to its originally tested state**.
+Confirm that before you ship anything:
+
+```bash
+git diff <first-commit> -- run.py src/ install.py requirements.txt   # must be empty
+```
+
+(A two-line change lived in `src/_worker.py` while the browser ran off-box. It
+was approved at the time and has since been reverted.)
 
 Before you edit anything under `src/`, ask whether you can get the same result
 from outside it. You almost always can — see rules 2 and 8 for two cases where
@@ -58,6 +64,9 @@ status only proves the code did not raise.
 
 ## 4. Remote browsers (CDP) lie about the viewport
 
+> Historical — the app runs a **local Chromium** now. Keep this if you ever move
+> the browser off-box again; it cost a full day the first time.
+
 Connecting over CDP is not the same as launching locally.
 
 * `new_context(viewport=…)` is **ignored**. So is `page.set_viewport_size()`.
@@ -82,6 +91,8 @@ If `inner` is not what you set, nothing downstream will be right.
 ---
 
 ## 5. Chromium ≠ Chrome: codecs
+
+> Also historical, and also the reason a remote browser is painful.
 
 Open-source **Chromium has no H.264/AAC**. X's videos are H.264, so every video
 post renders "The media could not be played" instead of a poster frame.
@@ -152,50 +163,59 @@ outside:
 
 ---
 
-## 9. Free hosts: what actually works
+## 9. Hosting: this app wants a real server
 
-Checked in 2026; re-check before trusting any of it.
+It now runs on an ordinary always-on VPS with root, which removes every
+workaround below. **Requirements: Docker, ≥4 GB RAM, a persistent disk.** Shared
+or "web" hosting cannot run Chromium.
+
+The free-tier detour is worth remembering only so nobody repeats it:
 
 | Host | Verdict |
 |---|---|
-| **Render free + Browserless free** | works, no card. ~512 MB RAM, sleeps after 15 min |
-| Oracle Cloud Always Free | works, always-on, real disk — needs a card |
-| Google Cloud Run | works, scale-to-zero — needs a card |
+| **Own VPS (Hostinger KVM, or similar)** | what this uses. No caps, real disk, real background workers |
+| Oracle Cloud Always Free | free forever, always-on — card needed, ARM capacity often unavailable |
+| Google Cloud Run | scale-to-zero — card needed, 60-min request ceiling |
+| Render free + Browserless free | no card, but 512 MB, sleeps, no disk, and a browser-minute cap |
 | Hugging Face Spaces | **Docker requires a paid plan** since July 2026 |
 | Vercel / serverless functions | cannot run a minutes-long backend |
 | Railway | trial credits only |
 
-Two structural constraints follow from the free tier:
-
-* **No disk.** The X session must live somewhere external
-  (`webapp/x_state_store.py`) or every cold start re-signs-in and burns metered
-  browser minutes.
-* **The CPU stops when the response is sent.** A background worker freezes
-  mid-capture. That is what `EXECUTION_MODE=inline` is for: the capture runs
-  *inside* the request and streams progress back.
+Free hosts forced two ugly adaptations, both since reverted: an external cookie
+store (no disk) and running the capture inside the HTTP request (the CPU stops
+once a response is sent). If you ever go back to such a host, those are the two
+things you will have to rebuild — `EXECUTION_MODE=inline` still exists for the
+second.
 
 ---
 
-## 10. Memory is the binding constraint, and it is measured
+## 10. Memory: measure, do not guess
+
+Measured with the browser *off-box*, so this is the app alone:
 
 | Report | App memory |
 |---|---|
 | 5 links | 366 MB |
 | 20 links | 413 MB |
-| Render free limit | **512 MB** |
 
-`MAX_LINKS=25` is not a guess. Do not raise it without re-measuring:
+On your own server add roughly **0.5–1 GB per Chromium worker** on top. That is
+where `WORKERS` comes from: one per 1–1.5 GB of free RAM.
+
+Re-measure before raising `WORKERS` or `MAX_LINKS`:
 
 ```bash
 docker stats --no-stream --format '{{.MemUsage}}' <container>
 ```
 
-An out-of-memory kill on Render looks like a job dying with no error and the
-service restarting — not like an exception.
+An out-of-memory kill looks like a job dying with no error and the container
+restarting — not like an exception.
 
 ---
 
 ## 11. Do not poll for status on an auto-scaling host
+
+> Not a concern on a single server — one instance, one database. It matters the
+> moment you run more than one replica.
 
 Every instance has its own SQLite. A status poll can land on an instance that
 has never heard of the job and answer `404` while the capture runs perfectly
@@ -208,19 +228,17 @@ status source that is always right.
 
 ---
 
-## 12. Concurrency is capped by the browser plan, not by your CPU
+## 12. Concurrency is bounded by RAM
 
-Total simultaneous browsers = `MAX_CONCURRENT_JOBS × CAPTURE_WORKERS`. A free
-remote-browser plan allows **2**. Exceeding it does not queue — it errors, as
-`Target page, context or browser has been closed` partway through a run.
-
-`config.py` clamps this automatically. Two related points:
+Total simultaneous browsers = `MAX_CONCURRENT_JOBS × WORKERS`, and each browser
+is ~0.5–1 GB. Overshoot and the kernel kills a job mid-run.
 
 * The **Influencer report uses one worker** (`INFLUENCER_WORKERS=1`). Its
-  follower-count cache is per worker *process*, so a second worker re-fetches
-  the same profiles — paying twice for the same data. One browser also leaves
-  headroom under the 2-concurrent cap rather than sitting exactly on it.
-* Raising workers on a metered browser costs money before it saves time.
+  follower-count cache lives in the worker *process*, so a second worker
+  re-fetches the same profiles. Raise it only if your lists rarely repeat an
+  account.
+* `shm_size: "1gb"` in `docker-compose.yml` is not optional. Docker's default
+  64 MB of shared memory makes Chromium crash on media-heavy posts.
 
 ---
 
@@ -230,8 +248,9 @@ remote-browser plan allows **2**. Exceeding it does not queue — it errors, as
   never served. Check `git ls-files` after any restructure.
 * Use a **dedicated, throwaway X account**. Bulk captures get accounts
   rate-limited and suspended.
-* The session store repo must be **private** with a repo-scoped token — whoever
-  holds `x_state.json` can act as the capture account.
+* `sessions/x_state.json` is a live login — whoever holds it can act as the
+  capture account. Keep it on the server only; never commit it, never put it in
+  a repo.
 * **Never delete a hand-uploaded cookie.** `invalidate()` only removes the
   session when credentials exist to recreate it; otherwise the admin is left
   with nothing and no way back.
@@ -325,5 +344,4 @@ code:
 - [ ] Tested with a reply URL and a video post
 - [ ] Checked peak memory if anything touches document building
 - [ ] Confirmed `.env` / `sessions/` are still untracked
-- [ ] Tested against the real host, not only locally — local Chromium hides
-      viewport and codec problems
+- [ ] Tested on the server, not only locally

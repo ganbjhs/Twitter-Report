@@ -120,7 +120,6 @@ Flags: `--title`, `--date dd-mm-yy`, `--workers N`, `--headed`. Output lands in
 │   ├── shot_quality.py       detects blank / black / half-loaded screenshots
 │   ├── report_builder.py     builds the Twitter PDF + DOCX
 │   ├── save_sessions.py      manual login flow
-│   ├── browser_backend.py    local Chromium vs remote browser over CDP
 │   └── capture/x_capture.py  the X capture algorithm
 │
 ├── influencer/               the Influencer report (parallel to src/)
@@ -136,7 +135,6 @@ Flags: `--title`, `--date dd-mm-yy`, `--workers N`, `--headed`. Output lands in
 │   ├── auth.py               sessions, CSRF, login rate limiting
 │   ├── uploads.py            upload parsing, validation, normalisation
 │   ├── x_login.py            headless X sign-in for the shared account
-│   ├── x_state_store.py      mirrors the X session to a private GitHub repo
 │   ├── routes_jobs.py        submit / status / cancel / download
 │   ├── jobs/
 │   │   ├── store.py          SQLite job records
@@ -146,8 +144,9 @@ Flags: `--title`, `--date dd-mm-yy`, `--workers N`, `--headed`. Output lands in
 │   ├── templates/            server-rendered pages
 │   └── static/               CSS + JS (no build step)
 │
-├── Dockerfile                the deployable image (no browser inside — see below)
-├── render.yaml               Render blueprint
+├── Dockerfile                the deployable image (Chromium included)
+├── docker-compose.yml        app + Caddy (HTTPS), with persistent volumes
+├── Caddyfile                 your domain, automatic HTTPS
 ├── requirements.txt          CLI dependencies
 ├── requirements-web.txt      web app dependencies
 │
@@ -196,154 +195,133 @@ Everything is environment variables, loaded from `.env` locally. See
 | `X_EMAIL` | X asks for this on logins from unfamiliar machines |
 | `X_TOTP_SECRET` | only if that account has 2FA on |
 
-**Browser**
-
-| Variable | Default | Notes |
-|---|---|---|
-| `BROWSER_BACKEND` | `local` | `local` launches Chromium here; `browserless` connects to a remote one. |
-| `BROWSERLESS_WS` | — | `wss://<region>.browserless.io?token=…` |
-| `BROWSER_MAX_CONCURRENCY` | `2` | Total simultaneous browsers is clamped to this. |
-
 **Work**
 
 | Variable | Default | Notes |
 |---|---|---|
-| `EXECUTION_MODE` | `queue` | `queue` = background workers; `inline` = capture runs inside the request (needed on hosts that sleep). |
-| `MAX_CONCURRENT_JOBS` | `1` | |
-| `CAPTURE_WORKERS` | `4` | Browsers per job (Twitter report). |
-| `INFLUENCER_WORKERS` | `1` | Browsers per job (Influencer report). Kept at 1 so the follower-count cache is shared and the browser plan's concurrency limit has headroom. |
+| `WORKERS` | `3` | Browsers per job. One per 1–1.5 GB of free RAM. |
+| `MAX_CONCURRENT_JOBS` | `1` | Total browsers = this × `WORKERS`. |
+| `INFLUENCER_WORKERS` | `1` | Browsers for the Influencer report. Its follower-count cache is per worker process, so extra workers re-fetch the same profiles. |
+| `EXECUTION_MODE` | `queue` | Background workers. `inline` exists only for hosts that stop the CPU after a response. |
 | `MAX_LINKS` | `200` | Per job. |
 | `MAX_UPLOAD_MB` | `5` | |
 | `JOB_TIMEOUT_MINUTES` | `90` | |
 | `RETENTION_DAYS` | `7` | Old jobs are deleted automatically. |
 
-**Session persistence** (for hosts with no disk)
-
-| Variable | Notes |
-|---|---|
-| `X_STATE_STORE` | `none` or `github` |
-| `X_STATE_GITHUB_REPO` | `you/report-secrets` — must be **private** |
-| `X_STATE_GITHUB_TOKEN` | fine-grained PAT, Contents: read+write, that repo only |
-
 ---
 
-## Deploying (free, no credit card)
+## Deploying on your own server
 
-**Render** runs the app; **Browserless** runs the browser. Neither needs a card.
+Runs on any always-on Linux box with root — a **Hostinger VPS (KVM)** is what
+this is written for. Not shared/web hosting: that cannot run Chromium or Docker.
 
+**Size it by RAM.** A browser costs ~0.5–1 GB, so allow one worker per 1–1.5 GB
+free. 4 GB is a sensible floor (`WORKERS=3`); 8 GB is comfortable (`WORKERS=5`).
+
+One container runs the web app, the background workers and Chromium. Caddy sits
+in front for automatic HTTPS. Nothing else, and no external services.
+
+### 1. Prepare the server
+
+```bash
+ssh root@<VPS_IP>
+apt update && apt -y upgrade
+apt -y install docker.io docker-compose-plugin git
+systemctl enable --now docker
+ufw allow 22 && ufw allow 80 && ufw allow 443 && ufw --force enable
 ```
-Office user ──HTTPS──▶ Render free web service : the app (no browser inside)
-                          ├──WebSocket (CDP)──▶ Browserless : runs Chromium
-                          └──────────────────▶ private GitHub repo : x_state.json
+
+### 2. Point a domain at it
+
+In Hostinger hPanel → DNS, add an **A record**:
+`reports.yourdomain.com → <VPS_IP>`.
+
+You can skip this and use the bare IP at first — see step 5.
+
+### 3. Get the code and configure it
+
+```bash
+git clone <YOUR_REPO_URL> app && cd app
+mkdir -p sessions data reports
+cp .env.example .env
+nano .env
 ```
 
-The image ships **without a browser** — 536 MB instead of 4 GB — which is what
-makes it fit a 512 MB free host.
+Set at minimum:
 
-### Measured limits — read before you start
-
-| | |
+| Variable | Value |
 |---|---|
-| App memory, 5-link report | 366 MB |
-| App memory, 20-link report | 413 MB |
-| **Render free tier** | **512 MB — the binding constraint** |
-| Browserless free | ~500 browser-minutes/month, **2 concurrent browsers** |
-| Render free | sleeps after ~15 min idle, ~30–50 s cold start, no disk |
+| `APP_USERS` | `alice:pw1,bob:pw2` — one pair per colleague |
+| `SESSION_SECRET` | `python3 -c "import secrets;print(secrets.token_urlsafe(48))"` |
+| `X_USERNAME` / `X_PASSWORD` / `X_EMAIL` | the dedicated X capture account |
+| `WORKERS` | `3` on 4 GB, `5` on 8 GB |
+| `COOKIE_SECURE` | `0` for now; `1` once HTTPS works |
 
-**Keep reports to about 25 links.** A 40-link report would very likely be killed
-for using too much memory; split larger lists. At ~3–4 browser-minutes per
-20-link report, budget roughly 100–150 reports a month.
+### 4. Seed the X login
 
-### Steps
+The first sign-in is easiest done by hand, because X may show a CAPTCHA to a
+brand-new server IP. On **your own computer**:
 
-**1. Browserless.** Sign up at <https://www.browserless.io> (free, no card).
-Copy the API token and region; your connection string is
-`wss://production-sfo.browserless.io?token=YOUR_TOKEN`.
-
-**2. A private repo for the X session.** Render wipes its disk on every restart,
-so without this the app re-signs-in to X on every cold start and burns
-Browserless minutes. Create a **private** repo (e.g. `report-secrets`) and a
-[fine-grained PAT](https://github.com/settings/tokens?type=beta) scoped to only
-that repo with **Contents: read and write**.
-
-> That file is a live X session — whoever holds it can act as the capture
-> account. Private repo, repo-scoped token.
-
-**3. Push the code** to GitHub.
-
-**4. Create the Render service.** <https://render.com> → **New → Web Service** →
-this repo → Runtime **Docker**, Instance type **Free**, Health check path
-`/health`. *(Or **New → Blueprint**, which reads [`render.yaml`](render.yaml).)*
-
-**5. Environment variables.** In the service → Environment:
-
-```
-BROWSER_BACKEND=browserless
-BROWSERLESS_WS=wss://production-sfo.browserless.io?token=YOUR_TOKEN
-BROWSER_MAX_CONCURRENCY=2
-
-EXECUTION_MODE=inline
-MAX_CONCURRENT_JOBS=1
-CAPTURE_WORKERS=2
-MAX_LINKS=25
-JOB_TIMEOUT_MINUTES=25
-
-APP_USERS=alice:pw1,bob:pw2
-SESSION_SECRET=<python3 -c "import secrets;print(secrets.token_urlsafe(48))">
-COOKIE_SECURE=1
-
-X_USERNAME=yourhandle
-X_PASSWORD=itspassword
-X_EMAIL=its@email.com
-
-X_STATE_STORE=github
-X_STATE_GITHUB_REPO=you/report-secrets
-X_STATE_GITHUB_TOKEN=github_pat_…
+```bash
+python save_login.py x                    # a browser opens; sign in
+scp sessions/x_state.json root@<VPS_IP>:~/app/sessions/x_state.json
 ```
 
-**6. Check it.** Open the URL, sign in, and look at **X login status** in the
-header — it should say *Signed in*. Run a small report of each type and confirm
-the downloads. **Download immediately** — the page says so, because Render's
-disk does not survive sleep.
+After that the server refreshes the cookie itself whenever it expires, using the
+`X_*` credentials. If you skip this step it will simply sign in on first use.
 
-**7. Optional: fewer cold starts.** Point a free uptime pinger at
-`https://<name>.onrender.com/health` every 10 minutes during office hours.
+### 5. Put your domain in Caddyfile, then start
 
-**8. Watch usage.** The Browserless dashboard shows units consumed
-(1 unit ≈ 30 s of browser time).
+Edit `Caddyfile` and replace `reports.example.com` with your domain. Then:
 
-> **Use a dedicated X account for capturing**, never a personal one — bulk
-> captures can get an account rate-limited or suspended. Turn 2FA off on it if
-> you can.
+```bash
+docker compose up -d --build
+```
 
-### Hosts that do not work
+The first build takes several minutes (it pulls the Playwright image). Then:
 
-Vercel and serverless functions (cannot run a minutes-long backend), Hugging
-Face free Spaces (Docker requires a paid plan since July 2026), Railway (trial
-credits only). Cloud Run, Fly and Oracle all work but require a credit card.
+```bash
+docker compose ps            # expect "running (healthy)"
+docker compose logs -f web
+```
+
+Open `https://reports.yourdomain.com` and sign in.
+
+> **Testing on a bare IP instead?** Comment out the `caddy` service in
+> `docker-compose.yml`, change the web service's port line to `"8000:8000"`,
+> and use `http://<VPS_IP>:8000`. Keep `COOKIE_SECURE=0` while you do.
+
+### 6. Check it
+
+Open **X login status** in the header — it should say *Signed in*. Then run a
+Twitter Report and an Influencer Report and confirm the downloads.
+
+Reboot the server once (`reboot`) and confirm it comes back on its own —
+`restart: unless-stopped` handles that.
 
 ---
 
 ## Operations and troubleshooting
 
-| Task | How |
+| Task | Command (on the server, in `~/app`) |
 |---|---|
-| Update the app | `git push` — Render redeploys |
-| Logs | Render dashboard → Logs |
-| Change a password | edit `APP_USERS` in Environment |
-| Rotate the X account | edit `X_USERNAME`/`X_PASSWORD`, then press **Sign in to X now** |
-| Expired X session | handled automatically — signs in again and re-saves |
+| Status | `docker compose ps` |
+| Logs | `docker compose logs -f web` |
+| Update after a code change | `git pull && docker compose up -d --build` |
+| Restart | `docker compose restart` |
+| Change a password | edit `APP_USERS` in `.env`, then `docker compose up -d` |
+| Rotate the X account | edit `X_USERNAME`/`X_PASSWORD`, `docker compose up -d`, then press **Sign in to X now** |
+| Expired X session | handled automatically — the server signs in again |
+| OS updates | `apt update && apt -y upgrade` occasionally |
 
 | Symptom | Fix |
 |---|---|
-| "Executable doesn't exist" | `BROWSER_BACKEND` / `BROWSERLESS_WS` not set — the image has no browser |
-| `connect_over_cdp … 401` | wrong Browserless token |
-| `connect_over_cdp … 429` | more than 2 concurrent browsers — keep jobs×workers ≤ 2 |
-| Job dies, service restarts | out of memory — lower `MAX_LINKS` |
-| First request takes ~40 s | it was asleep; set up the keep-alive ping |
-| Signs in to X every report | `X_STATE_STORE` unset, or the PAT lacks Contents:write |
-| Login page loops | `COOKIE_SECURE=1` without HTTPS |
-| "nobody can log in" | `APP_USERS` unset or malformed |
+| Job dies, container restarts | out of memory — lower `WORKERS`, or add RAM |
+| Captures fail on media-heavy posts | make sure `shm_size: "1gb"` is still in `docker-compose.yml` |
+| Login page loops back to itself | `COOKIE_SECURE=1` without HTTPS — set `0`, or finish the Caddy step |
+| "nobody can log in" | `APP_USERS` unset or malformed; needs `user:pass,user2:pass2` |
+| HTTPS certificate not issued | DNS A record not pointing here yet, or ports 80/443 blocked |
+| Every link hits a login wall | open **X login status**; the last sign-in error is shown there |
 | Links come back `login_wall` | open **X login status**; the last sign-in error is shown there |
 | Screenshot looks wrong | X may have changed its DOM — see the crop notes in `src/capture/x_capture.py` |
 
@@ -353,11 +331,10 @@ credits only). Cloud Run, Fly and Oracle all work but require a credit card.
 
 **The X pipeline is treated as frozen.** It was tested in production before the
 web app existed, so the web layer *invokes* it rather than rewriting it. The
-only change ever made to it is two lines in `src/_worker.py` (an import, and
-`p.chromium.launch(...)` → `launch_browser(p, headless)`) so it can use a remote
-browser. With `BROWSER_BACKEND` unset that helper returns exactly
-`p.chromium.launch(headless=…)`, so the original behaviour is byte-for-byte
-intact.
+It is currently **byte-for-byte identical to its originally tested state** —
+`git diff` against the first commit over `run.py`, `src/`, `install.py` and
+`requirements.txt` is empty. A temporary two-line change existed while the app
+ran on a remote browser service; that has been reverted.
 
 **Job isolation copies code, not just cwd.** `src/run_report.py` anchors its
 output with `Path(__file__).resolve().parents[1]` — the *file's* location, not

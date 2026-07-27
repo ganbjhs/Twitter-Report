@@ -104,38 +104,24 @@ SESSION_HOURS = _int("SESSION_HOURS", 12)
 COOKIE_SECURE = _bool("COOKIE_SECURE", False)
 
 # --------------------------------------------------------------------------- #
-# Browser backend — a local Chromium, or a remote one over CDP (Browserless).
-# The switch itself lives in src/browser_backend.py so the capture workers can
-# import it; these are only what the web layer needs to know.
+# Capture performance
+#
+# Chromium runs on this server, so the limit is the box's RAM and cores, not a
+# third party's plan. Rule of thumb: one worker per 1–1.5 GB of free RAM
+# (a browser costs ~0.5–1 GB).
+#
+# `WORKERS` is the name used in the deployment docs; CAPTURE_WORKERS is accepted
+# as an alias so older .env files keep working.
 # --------------------------------------------------------------------------- #
-BROWSER_BACKEND = (os.environ.get("BROWSER_BACKEND", "") or "local").strip().lower()
-BROWSERLESS_WS = os.environ.get("BROWSERLESS_WS", "").strip()
-REMOTE_BROWSER = BROWSER_BACKEND == "browserless" and bool(BROWSERLESS_WS)
-# Free remote-browser plans allow very few simultaneous browsers. Exceeding it
-# does not queue — it errors — so the app clamps itself rather than failing.
-BROWSER_MAX_CONCURRENCY = max(1, _int("BROWSER_MAX_CONCURRENCY", 2))
-
-# Capture performance / memory
 MAX_CONCURRENT_JOBS = max(1, _int("MAX_CONCURRENT_JOBS", 1))
-CAPTURE_WORKERS = max(1, _int("CAPTURE_WORKERS", 4))
+CAPTURE_WORKERS = max(1, _int("WORKERS", _int("CAPTURE_WORKERS", 3)))
 
-# The Influencer report runs single-browser by default, for two reasons:
-#   * it looks up each author's follower count once and caches it — but that
-#     cache lives in the worker PROCESS, so a second worker re-fetches the same
-#     profiles, which costs real browser time on a metered service;
-#   * one browser leaves headroom under a free plan's 2-concurrent limit instead
-#     of sitting exactly on it, which is what produced "Target page, context or
-#     browser has been closed" mid-run.
-# It is slower per report, and deliberately so. Raise it only on a host with a
-# local Chromium and spare cores.
+# The Influencer report defaults to one browser: it looks up each author's
+# follower count once and caches it, but that cache lives in the worker PROCESS,
+# so a second worker re-fetches the same profiles. Raise it if you have the
+# cores and the accounts rarely repeat.
 INFLUENCER_WORKERS = max(1, _int("INFLUENCER_WORKERS", 1))
 
-if REMOTE_BROWSER:
-    # Total simultaneous browsers = jobs x workers-per-job. Keep that within
-    # the remote plan's ceiling, shrinking the per-job workers first.
-    MAX_CONCURRENT_JOBS = min(MAX_CONCURRENT_JOBS, BROWSER_MAX_CONCURRENCY)
-    CAPTURE_WORKERS = max(
-        1, min(CAPTURE_WORKERS, BROWSER_MAX_CONCURRENCY // MAX_CONCURRENT_JOBS))
 JOB_TIMEOUT_MINUTES = max(1, _int("JOB_TIMEOUT_MINUTES", 90))
 
 # Upload limits
@@ -185,15 +171,12 @@ def startup_warnings() -> list:
     if not X_STATE_FILE.exists() and not (X_USERNAME and X_PASSWORD):
         warn.append(f"No X login cookie at {X_STATE_FILE} and no X_USERNAME / "
                     "X_PASSWORD to sign in with — captures will hit login "
-                    "walls. Either set those secrets, or run "
-                    "`python save_login.py x` locally and copy the file here.")
+                    "walls. Either set those in .env, or run "
+                    "`python save_login.py x` on your own machine and copy the "
+                    "file onto the server.")
     if X_TOTP_SECRET and not (X_USERNAME and X_PASSWORD):
         warn.append("X_TOTP_SECRET is set but X_USERNAME / X_PASSWORD are not — "
                     "auto sign-in is disabled.")
-    if BROWSER_BACKEND == "browserless" and not BROWSERLESS_WS:
-        warn.append("BROWSER_BACKEND=browserless but BROWSERLESS_WS is empty — "
-                    "falling back to a local Chromium, which needs far more RAM "
-                    "than a free host provides.")
     if EXECUTION_MODE not in ("queue", "inline"):
         warn.append(f"EXECUTION_MODE={EXECUTION_MODE!r} is not 'queue' or "
                     "'inline' — falling back to 'queue'.")

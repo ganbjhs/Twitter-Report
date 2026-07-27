@@ -1,0 +1,56 @@
+# Self-hosted deployment on your own always-on server (Hostinger VPS, or any
+# Linux box with root).
+#
+#   mkdir -p sessions data reports
+#   docker compose up -d --build
+#
+# One container runs the web app, the background job workers AND Chromium.
+# No separate worker, no broker, no external browser service.
+
+services:
+  web:
+    build: .
+    image: report-automation:latest
+    restart: unless-stopped          # survives a crash and a reboot
+    env_file: .env
+    ports:
+      # Bound to localhost — Caddy terminates HTTPS and proxies to it.
+      # While testing without a domain, change this to "8000:8000".
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Bind mounts, not named volumes, so you can scp the X login straight in
+      # and read generated reports off the disk.
+      - ./sessions:/app/sessions     # x_state.json — the X login
+      - ./data:/app/data             # job working dirs, outputs, jobs.db
+      - ./reports:/app/reports       # output if you run the CLI inside here
+    # Chromium needs more than Docker's default 64 MB of shared memory, or tabs
+    # crash on media-heavy posts.
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  # ---------------------------------------------------------------------------
+  # Free automatic HTTPS. Put your domain in Caddyfile and point its DNS A
+  # record at this server. Testing on a bare IP? Comment this service out and
+  # expose web on "8000:8000" above.
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - web
+
+volumes:
+  caddydata:
+  caddyconfig:
