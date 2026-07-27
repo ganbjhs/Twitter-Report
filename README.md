@@ -247,6 +247,12 @@ report.vedictech.in  →  200.97.175.12
 ```bash
 git clone <YOUR_REPO_URL> app && cd app
 mkdir -p sessions data reports
+
+# The container runs as UID 1000. Deploying as root leaves these folders
+# root-owned, the app cannot create its job directories, and it exits at
+# startup with "PermissionError: /app/data/jobs" — which surfaces as a 502.
+chown -R 1000:1000 sessions data reports
+
 cp .env.example .env
 nano .env
 ```
@@ -366,6 +372,7 @@ Reboot the server once (`reboot`) and confirm it comes back on its own —
 
 | Symptom | Fix |
 |---|---|
+| 502 from nginx, container `Restarting` | `docker compose logs web`. If it says `PermissionError: /app/data/jobs`, run `chown -R 1000:1000 data sessions reports` |
 | Job dies, container restarts | out of memory — lower `WORKERS`, or add RAM |
 | Captures fail on media-heavy posts | make sure `shm_size: "1gb"` is still in `docker-compose.yml` |
 | Login page loops back to itself | `COOKIE_SECURE=1` without HTTPS — set `0`, or finish the Caddy step |

@@ -239,6 +239,11 @@ is ~0.5–1 GB. Overshoot and the kernel kills a job mid-run.
   account.
 * `shm_size: "1gb"` in `docker-compose.yml` is not optional. Docker's default
   64 MB of shared memory makes Chromium crash on media-heavy posts.
+* **Bind mounts inherit HOST ownership, not the image's.** The Dockerfile
+  chowns `/app/data` to UID 1000, but mounting a root-owned host folder over it
+  wins. Deploying as root without `chown -R 1000:1000 data sessions reports`
+  gives `PermissionError: /app/data/jobs` at startup, a crash-loop, and a 502
+  from the proxy — which looks like a networking fault and is not one.
 
 ---
 
