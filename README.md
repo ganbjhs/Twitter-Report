@@ -276,10 +276,56 @@ After that the server refreshes the cookie itself whenever it expires, using the
 
 ### 5. Start it
 
-The domain is already set in `Caddyfile`, so:
-
 ```bash
 docker compose up -d --build
+```
+
+The app listens on `127.0.0.1:8000` — not exposed to the internet directly.
+Give it a public HTTPS address with **one** of the following.
+
+**A. The server already runs nginx (another site is on it)**
+
+Do not enable Caddy — two servers cannot both bind port 80, and stopping nginx
+would take the other site down. Add a server block instead:
+
+```bash
+cat > /etc/nginx/sites-available/report.vedictech.in <<'EOF'
+server {
+    listen 80;
+    server_name report.vedictech.in;
+
+    client_max_body_size 10M;          # uploads
+
+    location / {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+
+        # A capture takes minutes; do not cut the connection short.
+        proxy_read_timeout    3600s;
+        proxy_send_timeout    3600s;
+        proxy_buffering       off;     # keeps live progress flowing
+    }
+}
+EOF
+
+ln -sf /etc/nginx/sites-available/report.vedictech.in /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+
+apt -y install certbot python3-certbot-nginx
+certbot --nginx -d report.vedictech.in --redirect
+```
+
+`nginx -t` validates before reloading, and certbot only edits the block for this
+hostname — the other site is untouched.
+
+**B. Nothing else on ports 80/443**
+
+```bash
+docker compose --profile caddy up -d
 ```
 
 The first build takes several minutes (it pulls the Playwright image). Then:

@@ -34,11 +34,17 @@ services:
       start_period: 40s
 
   # ---------------------------------------------------------------------------
-  # Free automatic HTTPS. Put your domain in Caddyfile and point its DNS A
-  # record at this server. Testing on a bare IP? Comment this service out and
-  # expose web on "8000:8000" above.
+  # OPTIONAL: Caddy for automatic HTTPS, for a server with nothing else on
+  # ports 80/443.
+  #
+  #   docker compose --profile caddy up -d
+  #
+  # If the server ALREADY runs nginx or Apache for another site, do NOT enable
+  # this — two things cannot bind port 80. Point the existing web server at
+  # 127.0.0.1:8000 instead (see README, "Behind an existing nginx").
   # ---------------------------------------------------------------------------
   caddy:
+    profiles: ["caddy"]        # excluded from a plain `docker compose up -d`
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
