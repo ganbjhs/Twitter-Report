@@ -61,6 +61,30 @@ def display_title(name: str, fallback: str = "Report") -> str:
     return title or fallback
 
 
+# Characters no mainstream filesystem accepts in a name. Everything else the
+# user typed — spaces, dashes, brackets, non-Latin script — is kept, because the
+# download is meant to read exactly like the header of the document inside it.
+_ILLEGAL_IN_FILENAME = str.maketrans({c: " " for c in '/\\:*?"<>|'})
+
+
+def download_name(title: str, fallback: str = "Report") -> str:
+    """The name the browser saves the file under: the user's own text.
+
+    This is a Content-Disposition value, never a path — the file on disk keeps
+    the conservative `safe_stem` name — so only characters that would break a
+    save dialog are replaced. A reserved Windows device name is suffixed rather
+    than mangled, since "CON.pdf" cannot be written on Windows at all.
+    """
+    name = display_title(title, fallback).translate(_ILLEGAL_IN_FILENAME)
+    name = re.sub(r"\s{2,}", " ", name).strip(" .")
+    if not name:
+        return fallback
+    if name.upper() in {"CON", "PRN", "AUX", "NUL"} or \
+            re.fullmatch(r"(?:COM|LPT)[1-9]", name.upper()):
+        name += "_"
+    return name
+
+
 def safe_upload_name(filename: str) -> str:
     """A display-only version of the uploaded filename. Never used as a path."""
     base = Path((filename or "").replace("\\", "/")).name

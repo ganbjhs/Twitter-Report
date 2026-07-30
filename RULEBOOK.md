@@ -15,26 +15,40 @@ file explains *what will bite you*.
 `src/input_loader.py` and friends were tested in production before the web app
 existed. **Invoke them; do not rewrite them.**
 
-`src/` was **byte-for-byte identical to its originally tested state** until the
-reply-capture change (below). Everything else still is; check what you are about
-to touch:
+`src/` was byte-for-byte identical to its originally tested state until the
+capture-quality work below. `input_loader.py`, `report_builder.py`, `_worker.py`,
+`platforms.py` and `save_sessions.py` still are; check what you are about to
+touch:
 
 ```bash
 git diff <first-commit> -- run.py src/ install.py requirements.txt
-# expected: src/capture/x_capture.py only
+# expected: run.py, src/overlays.py, src/capture/x_capture.py,
+#           src/shot_quality.py, src/run_report.py
 ```
 
 (A two-line change lived in `src/_worker.py` while the browser ran off-box. It
 was approved at the time and has since been reverted.)
 
-**The one approved edit: `src/capture/x_capture.py` shoots a reply together with
-its parent** — parent name/@handle + text + media, then the reply's text and
-media, engagement bars hidden throughout. This could not be done from outside:
-the crop is chosen inside the capture, and the frozen dispatcher hands it the
-page. Its blast radius is the frame only — the result dict, the runner and the
-builder are untouched, and a non-reply post still comes out exactly as before.
+**Approved edit 1 — `src/capture/x_capture.py` shoots a reply together with its
+parent**: parent name/@handle + text + media, then the reply's text and media,
+engagement bars hidden throughout. This could not be done from outside: the crop
+is chosen inside the capture, and the frozen dispatcher hands it the page. Its
+blast radius is the frame only — the result dict, the runner and the builder are
+untouched, and a non-reply post still comes out exactly as before.
 `_THREAD_ANCESTORS` sets how far up the thread the frame reaches (1 = the
 parent). Everything the change relies on is written up in rule 6.
+
+**Approved edit 2 — overlays and the framing check** (`src/overlays.py`, plus
+its callers in both captures, `shot_quality.py` and `run_report.py`). Same
+argument: a dialog has to be taken off the page *before* the shutter, and only
+the capture holds the page. See rule 19 for what it fixes and why it is one bug,
+not two.
+
+**Approved edit 3 — `run.py --no-date`** (mirrored in
+`influencer/run_influencer.py`). The web app needs the document header to read
+exactly what the user typed, and `run.py` composes `"<title> <date>"` internally
+where no caller can reach it. Additive: without the switch every existing
+invocation behaves as before.
 
 Before you edit anything under `src/`, ask whether you can get the same result
 from outside it. You almost always can — see rules 2 and 8 for two cases where
@@ -165,6 +179,20 @@ and you get a black rectangle.
 
 Do not remove the retry/quality passes to make runs faster. They are why the
 output is trustworthy.
+
+**Prefer a DOM fact to a pixel guess.** The gate now runs three checks, in
+descending order of confidence (`run_report._why_poor`):
+
+| check | evidence | on failure |
+|---|---|---|
+| `overlay` | the capture *saw* a dialog still on the post | retake, then **drop the link** |
+| `frame_ok` | the clip did not span parent → reply | retake, then warn and keep |
+| pixel analyzer | blank / black / dimmed histogram | retake, then keep |
+
+Only the first demotes a link out of the report, because only the first is an
+observation rather than an inference. A heuristic that drops links silently
+turns a cosmetic false positive into missing evidence — the pixel checks
+therefore ask for a retake and never for a deletion.
 
 ---
 
@@ -367,12 +395,60 @@ code:
 
 ---
 
+## 19. A stray dialog and a cropped reply are the same bug
+
+Both captures used to clear overlays like this, once, right after load:
+
+```python
+for sel in ('[data-testid="BottomBar"]', '[role="dialog"] [aria-label="Close"]'):
+    page.evaluate("(s)=>{const e=document.querySelector(s); if(e) e.remove()}", sel)
+```
+
+Read the second selector again: that removes the dialog's **close button** and
+leaves the dialog. And it ran too early — X's "Confirm age in X mobile app"
+sheet only opens *after* `_reveal_sensitive` clicks "View", which happens later.
+
+The visible symptom was a QR code in the middle of a report. The invisible one
+was worse:
+
+> **While a modal is open, X locks the page (`overflow:hidden` /
+> `position:fixed` on `<body>`) and `window.scrollBy` becomes a silent no-op.**
+
+`_align_top` scrolls a parent tweet to the viewport edge with exactly that call.
+Under the lock it does nothing, the clip starts at the wrong Y, and the reply is
+sheared off the bottom of the frame — which reads as "the reply-capture code is
+broken" and is nothing of the sort. One bug, two unrelated-looking symptoms.
+
+`src/overlays.py` now owns all of it: click the real close button, then remove
+`[role="dialog"]` / `sheetDialog` / `mask` / `BottomBar` and any fixed layer
+covering ≥85% of the viewport from its top-left corner, then **release the
+scroll lock whether or not anything was removed**. It runs on load, again after
+the sensitive-content gate, and again before every retake — X re-renders the
+column as media settles and brings sheets back.
+
+Two things it deliberately does *not* do:
+
+* **Never remove a fixed element that contains an `article`,** and never one
+  narrower than 85% of the viewport. X's left nav rail is fixed and 275 px wide;
+  taking it out reflows the column mid-capture (rule 4 territory).
+* **Never keep clicking an age gate.** Since July 2026 X can demand age
+  verification through its mobile app, which a desktop browser cannot satisfy at
+  all. Those posts return `status="age_restricted"` and are reported, not
+  screenshotted as a grey placeholder.
+
+Also note `article_age_gated` subtracts the post's own `tweetText` before
+matching. Without that, a tweet *about* age-restricted content gets dropped as
+if it were one.
+
+---
+
 ## Checklist before you ship a change
 
 - [ ] `git status` on `run.py`, `src/`, `install.py`, `requirements.txt` is clean
 - [ ] Ran **both** report types end to end
 - [ ] **Opened the PDF and the DOCX and looked at them**
-- [ ] Tested with a reply URL and a video post
+- [ ] Tested with a reply URL, a video post and an age-restricted post
+- [ ] Confirmed no X dialog, action bar or "Hide" toggle is in any screenshot
 - [ ] Checked peak memory if anything touches document building
 - [ ] Confirmed `.env` / `sessions/` are still untracked
 - [ ] Tested on the server, not only locally

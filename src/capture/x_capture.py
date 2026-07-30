@@ -15,11 +15,19 @@ X renders the parent above the reply, so the frame runs
 
 as one continuous image. The parent's own action bar (which would otherwise sit
 in the middle of that frame) is hidden before the shot, so no likes/reposts/
-replies appear anywhere in the picture.
+replies appear anywhere in the picture. The frame is checked against that
+promise before the shot is accepted (`_frame_covers`), so a reply that came out
+cropped to its parent is retaken instead of shipped.
+
+Overlays — X's dialogs, sheets and dim backdrops — are cleared by `overlays`
+before every take. See that module for why a stray dialog and a mis-framed
+reply are the same bug.
 
 Returns:
-    {"url", "status", "handle", "screenshot", "text"}
-    status: "ok" | "login_wall" | "not_found" | "error: …"
+    {"url", "status", "handle", "screenshot", "text", "overlay", "frame_ok"}
+    status : "ok" | "login_wall" | "not_found" | "age_restricted" | "error: …"
+    overlay: True when a dialog was STILL over the post when the shot was taken
+    frame_ok: False when the frame did not cover what the crop promised
 """
 import random
 import re
@@ -31,6 +39,26 @@ try:                                    # src/ is on sys.path when the worker ru
 except Exception:                       # analyzer unavailable -> treat every shot as good
     def _shot_quality(path):
         return True, "no-analyzer"
+
+try:
+    import overlays
+except Exception:                       # never let a missing helper kill a capture
+    class overlays:                     # noqa: N801 — stand-in, same call surface
+        @staticmethod
+        def dismiss(page):
+            return {"removed": 0, "age_gated": False, "still_open": False}
+
+        @staticmethod
+        def present(page):
+            return False
+
+        @staticmethod
+        def hide_media_controls(page):
+            pass
+
+        @staticmethod
+        def article_age_gated(article):
+            return False
 
 _SHOOT_RETRIES = 2                       # extra in-capture retakes if a shot looks bad
 
@@ -271,6 +299,112 @@ def _align_top(page, locator) -> None:
     page.wait_for_timeout(250)
 
 
+# JS: does this article carry X's "Replying to @someone" line? That line is the
+# post's own statement that it is a reply, so it holds even when the status id
+# could not be read and the article had to be chosen by scoring.
+_IS_REPLY = """el => /(^|\\n)\\s*Replying to/.test(el.innerText || '')"""
+
+
+def _is_reply(locator) -> bool:
+    try:
+        return bool(locator.evaluate(_IS_REPLY))
+    except Exception:
+        return False
+
+
+def _ensure_parent(page, url: str, tweet, idx: int):
+    """Re-resolve a reply that ended up with no ancestor above it.
+
+    X virtualises the conversation column, so scrolling the reply into view can
+    unmount the parent — which lands the reply at index 0. `first` then equals
+    `idx`, the frame silently shrinks to the reply alone, and (when the pick was
+    one article off) to the parent alone. Both are the bug this guards.
+
+    Scrolling back to the top of the column remounts the ancestors; the focused
+    post is then located again by status id. Returns the original pair when
+    nothing better can be found, so a genuinely parentless post still captures.
+    """
+    if idx > 0 or not _is_reply(tweet):
+        return tweet, idx
+    try:
+        page.evaluate("() => window.scrollTo(0, 0)")
+        page.wait_for_timeout(600)
+    except Exception:
+        return tweet, idx
+    again, again_idx = _locate_focused(page, url)
+    if again is not None and again_idx > 0:
+        return again, again_idx
+    return tweet, idx
+
+
+def _expand_text(page, article) -> None:
+    """Click a post's 'Show more' so its full text is inside the frame.
+
+    X truncates long posts; on a parent that means the report shows half a
+    sentence. Only the in-place expander is used — the same label also exists as
+    a *link* elsewhere on the page, and clicking that navigates away — and the
+    URL is checked afterwards so a surprise navigation is undone rather than
+    silently capturing a different page.
+    """
+    before = page.url
+    for finder in (lambda: article.get_by_test_id("tweet-text-show-more-link"),
+                   lambda: article.get_by_role("button", name="Show more",
+                                               exact=True)):
+        try:
+            btn = finder().locator("visible=true").first
+            if btn.count() == 0:
+                continue
+            btn.click(timeout=1200)
+            page.wait_for_timeout(400)
+        except Exception:
+            continue
+        if page.url != before:              # it was a link after all — undo it
+            try:
+                page.go_back(wait_until="domcontentloaded", timeout=20000)
+                page.wait_for_selector(TWEET_SELECTOR, timeout=_SELECTOR_TIMEOUT)
+            except Exception:
+                pass
+            return
+        return
+
+
+def _frame_covers(clip, tweet, top_el) -> bool:
+    """Does `clip` actually contain what the crop promised?
+
+    Two ways the promise breaks, both of which used to ship silently:
+      * the frame starts BELOW the parent's top edge — the parent's name row is
+        cut off, or the parent is missing entirely
+      * the frame ends before the reply's own text — the picture is the parent
+        with the reply sheared off the bottom (the reported failure)
+    """
+    if not clip:
+        return False
+    bottom = clip["y"] + clip["height"]
+
+    if top_el is not None:
+        try:
+            top_box = top_el.bounding_box()
+        except Exception:
+            top_box = None
+        if not top_box or clip["y"] > top_box["y"] + 4:
+            return False
+
+    try:
+        art = tweet.bounding_box()
+    except Exception:
+        art = None
+    if art and bottom < art["y"] + 60:      # the focused post barely made it in
+        return False
+
+    try:
+        body = tweet.locator('[data-testid="tweetText"]').first.bounding_box()
+    except Exception:
+        body = None
+    if body and body["y"] + body["height"] > bottom + 2:
+        return False                        # its text runs past the cut
+    return True
+
+
 def _wait_rendered(page, tweet, lo: int = 0, hi: int = 0) -> None:
     """Block until the captured articles' images are loaded (bounded, best-effort).
 
@@ -450,7 +584,8 @@ def _screenshot_clip(page, clip, shot_path) -> None:
 
 def capture(page, url: str, shot_path: Path) -> dict:
     """Capture one X post. Returns a result dict; never raises for content issues."""
-    result = {"url": url, "status": "ok", "handle": "", "screenshot": None, "text": ""}
+    result = {"url": url, "status": "ok", "handle": "", "screenshot": None,
+              "text": "", "overlay": False, "frame_ok": True}
 
     status = _load_tweet(page, url)
     if status != "ok":
@@ -462,61 +597,80 @@ def capture(page, url: str, shot_path: Path) -> dict:
             pass
         return result
 
-    # Remove any logged-out bottom banner / dialog that could overlap the tweet.
-    for sel in ['[data-testid="BottomBar"]', '[role="dialog"] [aria-label="Close"]']:
-        try:
-            if page.locator(sel).first.is_visible(timeout=800):
-                page.evaluate(
-                    "(s)=>{const e=document.querySelector(s); if(e) e.remove();}", sel)
-        except Exception:
-            pass
+    # Clear X's dialogs / sheets / dim backdrop and release the scroll lock they
+    # leave behind — `_align_top` below is a no-op while that lock is in place.
+    age_gated = overlays.dismiss(page)["age_gated"]
 
     articles = page.locator(TWEET_SELECTOR)
     tweet, idx = _locate_focused(page, url)     # article 0 is the PARENT on a reply
     if tweet is None:                           # no usable id — fall back to scoring
         idx, _count = _pick_article(page, url)
         tweet = articles.nth(idx)
+    tweet, idx = _ensure_parent(page, url, tweet, idx)   # a reply must have its parent
     first = max(0, idx - _THREAD_ANCESTORS)     # == idx unless this post is a reply
     top_el = articles.nth(first) if first < idx else None
 
     # A sensitive-content gate on the parent would blank half the frame, so clear
-    # the gate on every post we are about to shoot, not just the linked one.
+    # the gate on every post we are about to shoot, not just the linked one — and
+    # expand any truncated text, so the parent goes in whole rather than as half
+    # a sentence ending in "Show more".
     for i in range(first, idx + 1):
         _reveal_sensitive(page, articles.nth(i))
+        _expand_text(page, articles.nth(i))
+    # "View" on age-restricted media opens X's mobile-app verification sheet, so
+    # the gate has to be re-checked AFTER revealing, not only on load.
+    age_gated = overlays.dismiss(page)["age_gated"] or age_gated
+    age_gated = age_gated or any(overlays.article_age_gated(articles.nth(i))
+                                 for i in range(first, idx + 1))
+
     _wait_rendered(page, tweet, first, idx)     # don't shoot until media has loaded
     result["handle"] = _read_handle(tweet)
 
     def _shoot():
-        # Re-hide each time: X re-renders the column as media settles, which can
-        # bring a parent's action bar back.
+        # Re-dismiss and re-hide each time: X re-renders the column as media
+        # settles, which brings back both a parent's action bar and any sheet.
+        overlays.dismiss(page)
+        overlays.hide_media_controls(page)   # the "Hide" toggle sits ON the media
         _hide_ancestor_engagement(page, first, idx)
         if top_el is not None:
             _hide_sticky_chrome(page)      # or the "← Post" bar covers the parent
             _align_top(page, top_el)
         clip = _crop_box(page, tweet, top_el)
+        covers = _frame_covers(clip, tweet, top_el)
         try:
             if clip:
                 _screenshot_clip(page, clip, shot_path)
             else:                               # last resort: whole article
                 tweet.screenshot(path=str(shot_path))
+                covers = top_el is None         # an element shot cannot hold both
         except Exception:
             # A clip that lands outside the frame must not cost us the post —
             # fall back to the post on its own (engagement bar and all).
             tweet.screenshot(path=str(shot_path))
+            covers = top_el is None
+        # Whatever was still painted over the post IS in the pixels (rule 16).
+        return covers, overlays.present(page)
 
-    # Take the shot; if it comes out blank/black/half-loaded, give the post more
-    # time (re-dismiss the sensitive gate, re-wait for media) and try again.
-    _shoot()
+    # Take the shot; if it comes out blank/black/half-loaded, still covered by a
+    # dialog, or framed to less than the crop promised, give the post more time
+    # (re-dismiss the sensitive gate, re-wait for media) and try again.
+    covers, covered = _shoot()
     for _ in range(_SHOOT_RETRIES):
         good, _why = _shot_quality(str(shot_path))
-        if good:
+        if good and covers and not covered:
             break
         page.wait_for_timeout(2000)
         for i in range(first, idx + 1):
             _reveal_sensitive(page, articles.nth(i))
         _wait_rendered(page, tweet, first, idx)
-        _shoot()
+        covers, covered = _shoot()
     result["screenshot"] = str(shot_path)
+    result["frame_ok"] = bool(covers)
+    result["overlay"] = bool(covered)
+    if age_gated:
+        # Desktop cannot satisfy X's age check, so retrying is pointless and the
+        # picture is a grey placeholder. Report it instead of shipping it.
+        result["status"] = "age_restricted"
 
     try:
         result["text"] = tweet.locator('[data-testid="tweetText"]').first.inner_text()[:280]

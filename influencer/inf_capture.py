@@ -16,10 +16,11 @@ that define the Influencer report:
      scraped for the metrics table in the document.
 
 Returns:
-    {"url", "status", "handle", "screenshot", "text", "metrics"}
-    status : "ok" | "login_wall" | "not_found" | "error: …"
+    {"url", "status", "handle", "screenshot", "text", "metrics", "overlay"}
+    status : "ok" | "login_wall" | "not_found" | "age_restricted" | "error: …"
     metrics: {"reactions", "comments", "reach", "shares"} — display strings,
              "—" when a value could not be read.
+    overlay: True when an X dialog was STILL over the post when it was shot.
 """
 import random
 import re
@@ -31,6 +32,26 @@ try:                                    # src/ is on sys.path when the worker ru
 except Exception:                       # analyzer unavailable -> treat every shot as good
     def _shot_quality(path):
         return True, "no-analyzer"
+
+try:                                    # shared with the X capture, read-only
+    import overlays
+except Exception:                       # never let a missing helper kill a capture
+    class overlays:                     # noqa: N801 — stand-in, same call surface
+        @staticmethod
+        def dismiss(page):
+            return {"removed": 0, "age_gated": False, "still_open": False}
+
+        @staticmethod
+        def present(page):
+            return False
+
+        @staticmethod
+        def hide_media_controls(page):
+            pass
+
+        @staticmethod
+        def article_age_gated(article):
+            return False
 
 TWEET_SELECTOR = 'article[data-testid="tweet"]'
 
@@ -469,7 +490,7 @@ def read_followers(page, handle: str) -> str:
 def capture(page, url: str, shot_path: Path) -> dict:
     """Capture one X post with engagement in frame. Never raises for content."""
     result = {"url": url, "status": "ok", "handle": "", "screenshot": None,
-              "text": "", "platform": "x",
+              "text": "", "platform": "x", "overlay": False,
               "metrics": {"followers": MISSING, "reactions": MISSING,
                           "comments": MISSING, "reach": MISSING,
                           "shares": MISSING}}
@@ -484,38 +505,45 @@ def capture(page, url: str, shot_path: Path) -> dict:
             pass
         return result
 
-    # Strip overlays that could sit on top of the post.
-    for sel in ('[data-testid="BottomBar"]', '[role="dialog"] [aria-label="Close"]'):
-        try:
-            if page.locator(sel).first.is_visible(timeout=800):
-                page.evaluate(
-                    "(s)=>{const e=document.querySelector(s); if(e) e.remove();}", sel)
-        except Exception:
-            pass
+    # Strip every overlay off the post — dialogs, sheets and the dim backdrop —
+    # and release the scroll lock they leave behind. See src/overlays.py.
+    age_gated = overlays.dismiss(page)["age_gated"]
 
     tweet, _info = _pick_article(page, url)
 
     _reveal_sensitive(page, tweet)
+    # "View" on age-restricted media opens X's mobile-app verification sheet, so
+    # the gate has to be re-checked AFTER revealing, not only on load.
+    age_gated = overlays.dismiss(page)["age_gated"] or age_gated
+    age_gated = age_gated or overlays.article_age_gated(tweet)
+
     _wait_rendered(page, tweet)
     result["handle"] = _read_handle(tweet)
 
     def _shoot():
+        # Re-dismiss each time: X re-renders the column as media settles and can
+        # bring a sheet back on top of the post.
+        overlays.dismiss(page)
+        overlays.hide_media_controls(page)   # the "Hide" toggle sits ON the media
         clip = _crop_box(page, tweet)
         if clip:
             page.screenshot(path=str(shot_path), clip=clip)
         else:
             tweet.screenshot(path=str(shot_path))
+        # Whatever is still painted over the post IS in the pixels (rule 16).
+        return overlays.present(page)
 
-    _shoot()
+    covered = _shoot()
     for _ in range(_SHOOT_RETRIES):
         good, _why = _shot_quality(str(shot_path))
-        if good:
+        if good and not covered:
             break
         page.wait_for_timeout(2000)
         _reveal_sensitive(page, tweet)
         _wait_rendered(page, tweet)
-        _shoot()
+        covered = _shoot()
     result["screenshot"] = str(shot_path)
+    result["overlay"] = bool(covered)
 
     try:
         result["metrics"] = read_metrics(tweet)
@@ -527,6 +555,11 @@ def capture(page, url: str, shot_path: Path) -> dict:
             '[data-testid="tweetText"]').first.inner_text()[:280]
     except Exception:
         pass
+
+    if age_gated:
+        # Desktop cannot satisfy X's age check, so retrying is pointless and the
+        # picture is a grey placeholder. Report it instead of shipping it.
+        result["status"] = "age_restricted"
 
     time.sleep(random.uniform(1.0, 2.0))            # human-like pacing
     return result

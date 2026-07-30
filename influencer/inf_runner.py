@@ -101,10 +101,19 @@ def _shot_ok(result) -> bool:
         Path(shot).stat().st_size > MIN_SHOT_BYTES
 
 
+def _why_poor(result):
+    """Why this shot is not trustworthy, or None when it is. Mirrors
+    `src/run_report._why_poor`: the DOM fact first, the pixel analyzer after."""
+    if result.get("overlay"):
+        return "an X dialog was still covering the post"
+    good, why = shot_quality.screenshot_quality(result["screenshot"])
+    return None if good else why
+
+
 def _quality_ok(result) -> bool:
     if not _shot_ok(result):
         return False
-    return shot_quality.screenshot_quality(result["screenshot"])[0]
+    return _why_poor(result) is None
 
 
 def verify(collected) -> None:
@@ -172,7 +181,7 @@ def main() -> None:
         poor_tasks = [t for t in tasks if t["idx"] in poor_idx]
         print(f"[quality] recapturing {len(poor_tasks)} low-quality screenshot(s)...")
         for t in poor_tasks:
-            why = shot_quality.screenshot_quality(by_idx[t["idx"]]["screenshot"])[1]
+            why = _why_poor(by_idx[t["idx"]]) or "unknown"
             print(f"[quality]   ↻ {by_idx[t['idx']].get('account_name')}  ({why})")
         fixed = 0
         for r in _run(poor_tasks, headless, state):
@@ -180,6 +189,16 @@ def main() -> None:
             if _quality_ok(r):
                 fixed += 1
         print(f"[quality] improved {fixed}/{len(poor_tasks)}")
+
+    # Final gate — same rule as the X runner: a dialog that survived every
+    # retake is an observed fact, so the link is reported rather than printed
+    # into the document. Pixel judgements never demote; they are heuristics.
+    blocked = [r for r in by_idx.values()
+               if r.get("status") == "ok" and r.get("overlay")]
+    for r in blocked:
+        r["status"] = "overlay_blocked"
+    if blocked:
+        print(f"[quality] dropping {len(blocked)} shot(s) still covered by an X dialog")
 
     collected = list(by_idx.values())
     collected.sort(key=lambda r: r.get("idx", 0))

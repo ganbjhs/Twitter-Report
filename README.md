@@ -61,8 +61,13 @@ python influencer/run_influencer.py links.xlsx              # Influencer report
 python run.py -                                             # paste links on stdin
 ```
 
-Flags: `--title`, `--date dd-mm-yy`, `--workers N`, `--headed`. Output lands in
-`reports/`.
+Flags: `--title`, `--date dd-mm-yy`, `--no-date`, `--workers N`, `--headed`.
+Output lands in `reports/`.
+
+The header reads `"<title> <date>"` and the file is named `<Title>_<date>`. Pass
+`--no-date` and both become the title verbatim — which is what the web app does,
+so a report named *July Fake Accounts* has exactly that at the top of the page
+and downloads as `July Fake Accounts.pdf`.
 
 ---
 
@@ -98,10 +103,16 @@ Flags: `--title`, `--date dd-mm-yy`, `--workers N`, `--headed`. Output lands in
    capture account.
 4. **Capture.** The pipeline runs as a subprocess, exactly as the CLI does. It
    screenshots each post, retries failures, and re-captures blank/black shots.
+   Before every shutter it clears X's dialogs, sheets and dim backdrop off the
+   post; a reply is shot together with its parent, and the frame is checked
+   against that promise before it is accepted.
 5. **Build.** Screenshots are JPEG-compressed and assembled into a PDF and DOCX.
-6. **Deliver.** PDF, DOCX and a ZIP of all screenshots, scoped to the session
-   that created the job. Links that failed are listed in the activity log with a
-   reason, and left out of the document.
+   The document header is exactly the name you typed — no date, no decoration.
+6. **Deliver.** PDF, DOCX and a ZIP of all screenshots, named after the report
+   and scoped to the session that created the job. Links that failed are listed
+   in the activity log with a reason, and left out of the document — including
+   posts X age-restricted behind mobile-app verification, which a desktop
+   browser cannot get past.
 
 ---
 

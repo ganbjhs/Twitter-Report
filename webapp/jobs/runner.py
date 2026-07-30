@@ -120,13 +120,20 @@ def build_job_dir(job_id: str, rows: list, upload_bytes: bytes,
 # Command
 # --------------------------------------------------------------------------- #
 def build_command(report_type: str, title: str, date: str) -> list:
-    """The exact CLI invocation, identical in shape to what you run by hand."""
+    """The exact CLI invocation, identical in shape to what you run by hand.
+
+    `--no-date` is what makes the document header read exactly what the user
+    typed in "Report / File Name" and nothing else. `--date` is still passed so
+    the invocation stays reproducible by hand; the switch simply keeps it out of
+    the header.
+    """
     influencer = report_type != "twitter"
     entry = str(Path("influencer") / "run_influencer.py") if influencer else "run.py"
     workers = config.INFLUENCER_WORKERS if influencer else config.CAPTURE_WORKERS
     return [sys.executable, "-u", entry, "input.xlsx",
             "--title", title,
             "--date", date,
+            "--no-date",
             "--workers", str(workers)]
 
 
@@ -137,6 +144,8 @@ _RE_TOTAL = re.compile(r"^\[runner\]\s+(\d+)\s+X link\(s\) loaded")
 _RE_WORKERS = re.compile(r"^\[runner\]\s+capturing with (\d+) parallel worker")
 _RE_RETRY = re.compile(r"^\[runner\]\s+retrying (\d+) link")
 _RE_QUALITY = re.compile(r"^\[quality\]\s+recapturing (\d+)")
+_RE_BLOCKED = re.compile(r"^\[quality\]\s+dropping (\d+) shot")
+_RE_CROPPED = re.compile(r"^\[quality\]\s+(\d+) shot\(s\) may be missing")
 _RE_VERIFY = re.compile(r"^\[verify\]\s+(\d+)/(\d+) links produced")
 _RE_RESULT = re.compile(r"^\s+\[x\]\s+(\S+)\s+(.*)$")
 _RE_SKIPPED = re.compile(r"^\[input\]\s+skipped (\d+) non-X link")
@@ -208,7 +217,19 @@ class _Progress:
         if m:
             self.set_phase("Re-capturing low-quality screenshots")
             self.note(f"Re-capturing {m.group(1)} screenshot(s) that came out "
-                      "blank, black or half-loaded.", "warn")
+                      "blank, black, half-loaded or covered by an X dialog.",
+                      "warn")
+            return
+        m = _RE_BLOCKED.match(text)
+        if m:
+            self.note(f"{m.group(1)} post(s) still had an X dialog on top after "
+                      "every retake — left out rather than shown as a popup.",
+                      "warn")
+            return
+        m = _RE_CROPPED.match(text)
+        if m:
+            self.note(f"{m.group(1)} screenshot(s) may not show the whole post "
+                      "and its reply — check them in screenshots.zip.", "warn")
             return
         m = _RE_VERIFY.match(text)
         if m:
@@ -270,6 +291,11 @@ def _read_results(app: Path) -> list:
 _STATUS_REASON = {
     "login_wall": "X asked for a login — the server's X session may have expired",
     "not_found": "post unavailable, deleted, protected or suspended",
+    "age_restricted": "X age-restricted this post and only accepts age "
+                      "verification through its mobile app, so the content "
+                      "cannot be shown in a desktop capture",
+    "overlay_blocked": "an X dialog stayed on top of the post through every "
+                       "retake, so the screenshot showed the popup instead",
 }
 
 

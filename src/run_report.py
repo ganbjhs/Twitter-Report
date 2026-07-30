@@ -104,11 +104,29 @@ def _shot_ok(result) -> bool:
     return bool(shot) and Path(shot).exists() and Path(shot).stat().st_size > MIN_SHOT_BYTES
 
 
+def _why_poor(result):
+    """Why this shot is not trustworthy, or None when it is.
+
+    Three independent checks, strongest evidence first. The first two are facts
+    the capture observed in the DOM — a dialog that was still painted over the
+    post, and a frame that did not reach both the parent and the reply it
+    promised. The third is the pixel analyzer, which is the backstop for
+    anything the DOM checks did not anticipate.
+    """
+    if result.get("overlay"):
+        return "an X dialog was still covering the post"
+    if result.get("frame_ok") is False:
+        return "the frame did not cover the whole post + reply"
+    good, why = shot_quality.screenshot_quality(result["screenshot"])
+    return None if good else why
+
+
 def _quality_ok(result) -> bool:
-    """A shot that both exists AND doesn't look blank/black/half-loaded."""
+    """A shot that exists, isn't blank/black/half-loaded, isn't covered by a
+    dialog, and actually framed what the crop promised."""
     if not _shot_ok(result):
         return False
-    return shot_quality.screenshot_quality(result["screenshot"])[0]
+    return _why_poor(result) is None
 
 
 def verify(collected) -> None:
@@ -174,7 +192,7 @@ def main() -> None:
         poor_tasks = [t for t in tasks if t["idx"] in poor_idx]
         print(f"[quality] recapturing {len(poor_tasks)} low-quality screenshot(s)...")
         for t in poor_tasks:
-            why = shot_quality.screenshot_quality(by_idx[t["idx"]]["screenshot"])[1]
+            why = _why_poor(by_idx[t["idx"]]) or "unknown"
             print(f"[quality]   ↻ {by_idx[t['idx']].get('account_name')}  ({why})")
         # recapture overwrites the same file, so always take the fresh attempt
         # and count how many now pass the quality check.
@@ -184,6 +202,24 @@ def main() -> None:
             if _quality_ok(r):
                 fixed += 1
         print(f"[quality] improved {fixed}/{len(poor_tasks)}")
+
+    # Final gate. A dialog that survived every retake is a FACT, not a guess —
+    # the screenshot demonstrably shows a popup instead of the post, so the link
+    # is reported rather than printed into the document. The pixel-based
+    # judgements deliberately do NOT demote: they are heuristics, and a
+    # half-dark screenshot of the right post still beats a missing page.
+    blocked = [r for r in by_idx.values() if r.get("status") == "ok" and r.get("overlay")]
+    for r in blocked:
+        r["status"] = "overlay_blocked"
+    if blocked:
+        print(f"[quality] dropping {len(blocked)} shot(s) still covered by an X dialog")
+    cropped = [r for r in by_idx.values()
+               if r.get("status") == "ok" and r.get("frame_ok") is False]
+    if cropped:
+        print(f"[quality] {len(cropped)} shot(s) may be missing the parent post "
+              "or the reply")
+        for r in cropped:
+            print(f"[quality]   ! {r.get('account_name')}  {r.get('post_link')}")
 
     collected = list(by_idx.values())
     collected.sort(key=lambda r: r.get("idx", 0))

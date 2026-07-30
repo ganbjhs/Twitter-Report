@@ -35,12 +35,22 @@ def _take_flag(argv, flag):
     return None
 
 
+def _take_switch(argv, flag):
+    """Pop a valueless '--flag' out of argv, returning whether it was there."""
+    if flag in argv:
+        argv.remove(flag)
+        return True
+    return False
+
+
 def main():
     argv = sys.argv[:]
+    bare = _take_switch(argv, "--no-date")      # header = the title, verbatim
     title = _take_flag(argv, "--title") or "Influencer Report"
     date = _take_flag(argv, "--date") or datetime.date.today().strftime("%d-%m-%y")
-    header = f"{title} {date}"
-    stem = re.sub(r"[^0-9A-Za-z._-]+", "_", f"{title}_{date}").strip("_")
+    header = title if bare else f"{title} {date}"
+    stem = re.sub(r"[^0-9A-Za-z._-]+", "_",
+                  title if bare else f"{title}_{date}").strip("_")
 
     # 1) capture + verify (inf_runner reads sys.argv: source / --workers / --headed)
     sys.argv = argv

@@ -5,7 +5,6 @@ session's owner — a user can never reach another user's files, and no
 user-supplied string is ever used as a path.
 """
 import asyncio
-import datetime
 import json
 import time
 
@@ -258,9 +257,13 @@ async def download(job_id: str, kind: str,
     if not str(path).startswith(str(out) + "/") or not path.is_file():
         raise HTTPException(status_code=404, detail="That file is not available")
 
-    date = datetime.datetime.fromtimestamp(
-        job.get("finished_at") or job.get("created_at") or time.time()
-    ).strftime("%d-%m-%y")
+    # The download is named exactly what the user typed in "Report / File Name",
+    # matching the document's own header — spaces and all, since this is a
+    # Content-Disposition value and not a path (`path` above is the server's own
+    # conservative stem). No date is appended: two reports with the same name are
+    # meant to be the same file, and the browser disambiguates a genuine
+    # collision itself with "(1)".
+    stem = uploads.download_name(job.get("title") or job["name"])
     suffix = "_screenshots.zip" if kind == "zip" else f".{kind}"
     return FileResponse(path, media_type=_KINDS[kind],
-                        filename=f"{job['name']}_{date}{suffix}")
+                        filename=f"{stem}{suffix}")
