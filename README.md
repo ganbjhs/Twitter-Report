@@ -16,7 +16,7 @@ Two kinds of report:
 
 | | **Twitter Report** | **Influencer Report** |
 |---|---|---|
-| Screenshot | tweet with the engagement bar **cropped out**; a reply is shot together with its parent post | keeps username, text, media **and** likes/reposts |
+| Screenshot | tweet with the engagement bar **cropped out** (optional tick keeps it — see below); a reply is shot together with its parent post | keeps username, text, media **and** likes/reposts |
 | Metrics | none | Followers, Reactions, Comments, Reach, Shares |
 | Layout | one post per page, letter | **two posts per page**, A4 |
 | Ends with | links table | links table |
@@ -61,13 +61,29 @@ python influencer/run_influencer.py links.xlsx              # Influencer report
 python run.py -                                             # paste links on stdin
 ```
 
-Flags: `--title`, `--date dd-mm-yy`, `--no-date`, `--workers N`, `--headed`.
-Output lands in `reports/`.
+Flags: `--title`, `--date dd-mm-yy`, `--no-date`, `--workers N`, `--headed`,
+`--keep-engagement`. Output lands in `reports/`.
 
 The header reads `"<title> <date>"` and the file is named `<Title>_<date>`. Pass
 `--no-date` and both become the title verbatim — which is what the web app does,
 so a report named *July Fake Accounts* has exactly that at the top of the page
 and downloads as `July Fake Accounts.pdf`.
+
+### Keeping the engagement line (Twitter report only)
+
+By default the Twitter report cuts above the `time · views` line, so no counts
+appear anywhere in the picture. Tick **"Keep the engagement line in the
+screenshot"** on the form (or pass `--keep-engagement`) and the cut moves to
+just below the action bar instead. On a comment link that keeps *both* lines:
+
+```
+parent name/@handle + text + media + like/views
+    -> comment text + media + like/views
+```
+
+The tick is off by default and only exists for the Twitter report — the
+influencer capture already keeps engagement in frame, so the option is hidden
+when that type is selected.
 
 ---
 

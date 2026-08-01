@@ -13,6 +13,11 @@ Usage:
     python src/run_report.py -                      # paste links, Ctrl-D
     python src/run_report.py --workers 6            # more parallelism
     python src/run_report.py --headed               # watch the browser
+    python src/run_report.py --keep-engagement      # keep the like/views line
+
+By default the shot is cropped above the engagement bar. `--keep-engagement`
+keeps it — on a comment link that means the parent's like/views line AND the
+comment's own, both in frame.
 
 The X login comes from sessions/x_state.json — create it once with:
     python src/save_sessions.py x
@@ -78,7 +83,7 @@ def x_storage_state():
     return {"cookies": d.get("cookies", []), "origins": d.get("origins", [])}
 
 
-def build_tasks(rows) -> list:
+def build_tasks(rows, keep_engagement: bool = False) -> list:
     tasks = []
     for i, row in enumerate(rows, 1):
         capture_url = (row.get("link") or "").strip()
@@ -93,6 +98,7 @@ def build_tasks(rows) -> list:
             "account": account, "platform": "x",
             "category": row.get("category", "Uncategorized"),
             "shot": str(shot),
+            "keep_engagement": keep_engagement,
         })
     return tasks
 
@@ -144,10 +150,13 @@ def main() -> None:
     argv = sys.argv
     headless = "--headed" not in argv
     workers = int(_arg_value(argv, "--workers", DEFAULT_WORKERS))
+    keep_engagement = "--keep-engagement" in argv
 
     rows = input_loader.load(resolve_source(argv))
-    tasks = build_tasks(rows)
+    tasks = build_tasks(rows, keep_engagement)
     print(f"[runner] {len(tasks)} X link(s) loaded")
+    if keep_engagement:
+        print("[runner] keeping the engagement line (likes / views) in frame")
     if not tasks:
         print("[runner] nothing to capture"); return
 

@@ -119,22 +119,30 @@ def build_job_dir(job_id: str, rows: list, upload_bytes: bytes,
 # --------------------------------------------------------------------------- #
 # Command
 # --------------------------------------------------------------------------- #
-def build_command(report_type: str, title: str, date: str) -> list:
+def build_command(report_type: str, title: str, date: str,
+                  keep_engagement: bool = False) -> list:
     """The exact CLI invocation, identical in shape to what you run by hand.
 
     `--no-date` is what makes the document header read exactly what the user
     typed in "Report / File Name" and nothing else. `--date` is still passed so
     the invocation stays reproducible by hand; the switch simply keeps it out of
     the header.
+
+    `--keep-engagement` is Twitter-only: the influencer capture already keeps
+    likes and reposts in frame, so the switch would be meaningless there and is
+    never passed to it.
     """
     influencer = report_type != "twitter"
     entry = str(Path("influencer") / "run_influencer.py") if influencer else "run.py"
     workers = config.INFLUENCER_WORKERS if influencer else config.CAPTURE_WORKERS
-    return [sys.executable, "-u", entry, "input.xlsx",
-            "--title", title,
-            "--date", date,
-            "--no-date",
-            "--workers", str(workers)]
+    cmd = [sys.executable, "-u", entry, "input.xlsx",
+           "--title", title,
+           "--date", date,
+           "--no-date",
+           "--workers", str(workers)]
+    if keep_engagement and not influencer:
+        cmd.append("--keep-engagement")
+    return cmd
 
 
 # --------------------------------------------------------------------------- #
@@ -397,13 +405,18 @@ def run_job(job_id: str, on_line=None) -> dict:
     app = app_dir(job_id)
     stem = job["name"]
     date = datetime.date.today().strftime("%d-%m-%y")
-    cmd = build_command(job["report_type"], job["title"], date)
+    keep_engagement = bool(job.get("keep_engagement"))
+    cmd = build_command(job["report_type"], job["title"], date, keep_engagement)
 
     store.update(job_id, status="running", started_at=time.time(),
                  phase="Checking the X login", error="")
     prog = _Progress(job_id, job.get("total") or job.get("link_count") or 0)
     prog.note(f"Job started — {job['report_type']} report, "
               f"{job.get('link_count', 0)} link(s).")
+    if keep_engagement and job["report_type"] == "twitter":
+        prog.note("Screenshots will keep the engagement line (replies, reposts, "
+                  "likes, views) — on a comment link, the parent's line and the "
+                  "comment's own.")
 
     # The cookie file lives on an ephemeral disk on free hosts, so make sure a
     # valid X session exists before the capture starts. Cheap when it already

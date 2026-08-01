@@ -42,6 +42,7 @@ def public_job(job: dict) -> dict:
         "name": job["name"],
         "title": job["title"],
         "report_type": job["report_type"],
+        "keep_engagement": bool(job.get("keep_engagement")),
         "status": job["status"],
         "phase": job.get("phase") or "",
         "done": done,
@@ -96,11 +97,18 @@ async def submit_job(request: Request,
                      report_name: str = Form(...),
                      report_type: str = Form(...),
                      csrf_token: str = Form(...),
+                     keep_engagement: str = Form(""),
                      user: str = Depends(auth.require_user_api)):
     auth.verify_csrf(request, csrf_token)
 
     if report_type not in config.REPORT_TYPES:
         raise HTTPException(status_code=400, detail="Unknown report type.")
+
+    # An unticked checkbox is simply absent from the form body, so anything that
+    # arrives means "on". Twitter-only: the influencer capture always keeps the
+    # engagement line, so accepting it there would promise a choice that isn't one.
+    keep = report_type == "twitter" and keep_engagement.lower() not in ("", "0",
+                                                                        "false", "off")
 
     try:
         suffix = uploads.suffix_of(file.filename)
@@ -131,7 +139,7 @@ async def submit_job(request: Request,
 
     job_id = store.create(owner=user, name=stem, title=title,
                           report_type=report_type, link_count=len(rows),
-                          upload_name=upload_name)
+                          upload_name=upload_name, keep_engagement=keep)
     try:
         await asyncio.to_thread(runner.build_job_dir, job_id, rows, raw, upload_name)
     except Exception as e:

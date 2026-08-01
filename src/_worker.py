@@ -24,7 +24,8 @@ def run_chunk(chunk, headless, storage_state, ctx_kwargs, src_path):
         page = ctx.new_page()
         for t in chunk:
             try:
-                res = capture.capture(page, t["capture_url"], Path(t["shot"]), t["platform"])
+                res = capture.capture(page, t["capture_url"], Path(t["shot"]),
+                                      t["platform"], t.get("keep_engagement", False))
             except Exception as e:  # network/timeout — flag, keep going
                 res = {"url": t["capture_url"], "status": f"error: {e}",
                        "platform": t["platform"], "screenshot": None, "handle": ""}

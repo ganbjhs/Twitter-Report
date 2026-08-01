@@ -11,6 +11,20 @@ function initSubmitForm() {
   const errorBox = document.getElementById("form-error");
   const submitBtn = document.getElementById("submit-btn");
   const spinner = submitBtn.querySelector(".spinner");
+  const cropOption = document.getElementById("crop-option");
+  const keepEngagement = document.getElementById("keep-engagement");
+
+  // The influencer capture always keeps likes and reposts in frame, so the
+  // choice only exists for the Twitter report — hide it rather than show a
+  // tick that would do nothing.
+  const syncCropOption = () => {
+    if (!cropOption) return;
+    cropOption.hidden = form.report_type.value !== "twitter";
+  };
+  form.querySelectorAll('input[name="report_type"]').forEach((radio) =>
+    radio.addEventListener("change", syncCropOption)
+  );
+  syncCropOption();
 
   const showError = (msg) => {
     errorBox.textContent = msg;
@@ -74,6 +88,9 @@ function initSubmitForm() {
     body.append("report_name", nameInput.value.trim());
     body.append("report_type", form.report_type.value);
     body.append("csrf_token", form.csrf_token.value);
+    if (keepEngagement && keepEngagement.checked && form.report_type.value === "twitter") {
+      body.append("keep_engagement", "1");
+    }
 
     try {
       const res = await fetch("/api/jobs", { method: "POST", body });

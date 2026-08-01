@@ -19,6 +19,17 @@ replies appear anywhere in the picture. The frame is checked against that
 promise before the shot is accepted (`_frame_covers`), so a reply that came out
 cropped to its parent is retaken instead of shipped.
 
+`keep_engagement=True` asks for the opposite crop, for reports that are ABOUT
+the numbers: the cut moves to just below the focused post's action bar and the
+ancestors keep theirs, so a reply comes out as
+
+    parent name/@handle + text + media + like/views  ->  reply text + media
+    + like/views
+
+Nothing else changes — same framing, same retakes, same result dict — and the
+default is the tight crop above, so a caller that does not ask for this gets
+exactly the picture it always got.
+
 Overlays — X's dialogs, sheets and dim backdrops — are cleared by `overlays`
 before every take. See that module for why a stray dialog and a mis-framed
 reply are the same bug.
@@ -83,6 +94,7 @@ _SELECTOR_TIMEOUT = 22000
 # as THIS tweet's metadata (and not a quoted tweet's timestamp far above).
 _METADATA_LOOKBACK = 260
 _TOP_PAD = 2          # keep a hair of breathing room at the crop edge
+_BOTTOM_PAD = 10      # breathing room below the action bar when it is KEPT
 _MEDIA_TIMEOUT = 10000    # max ms to wait for the tweet's <img>s to fully decode
 _IDLE_TIMEOUT = 3500      # short cap for network settle (X long-polls, never idles)
 
@@ -512,12 +524,18 @@ def _read_handle(tweet) -> str:
     return ""
 
 
-def _crop_box(page, tweet, top_el=None):
+def _crop_box(page, tweet, top_el=None, keep_engagement=False):
     """Bounding box ending just above the focused tweet's engagement bar.
 
     Cut point = the highest of the main tweet's metadata `<time>` line and its
     action `[role="group"]`, so nothing engagement-related survives the crop.
     Falls back to the full article box if neither can be located.
+
+    With `keep_engagement` the cut goes the other way — to the BOTTOM of that
+    same action bar — so the "time · views" line and the reply/repost/like
+    counts stay in the picture. The bar's own bottom is the anchor rather than
+    the article's, because the article also contains the reply composer and the
+    thread below it.
 
     `top_el` is where the frame *starts*: the focused tweet itself for a normal
     post, or the parent article for a reply — which is what makes the shot cover
@@ -550,13 +568,19 @@ def _crop_box(page, tweet, top_el=None):
         return found
 
     groups = tops('[role="group"]')
-    cut = min((t for t, _ in groups), default=art_bottom)
+    if keep_engagement:
+        # Below the bar. The metadata/counts line needs no special handling —
+        # it sits above the bar, so it is already inside the frame.
+        cut = max((b for _, b in groups), default=art_bottom) + _BOTTOM_PAD
+        cut = min(cut, art_bottom)           # never spill past the article
+    else:
+        cut = min((t for t, _ in groups), default=art_bottom)
 
-    # Pull the cut above the metadata/counts line if a <time> sits just above
-    # the action bar (localized so a quoted tweet's timestamp is ignored).
-    for t_top, t_bottom in tops("time"):
-        if t_bottom <= cut + 4 and (cut - t_top) < _METADATA_LOOKBACK:
-            cut = min(cut, t_top)
+        # Pull the cut above the metadata/counts line if a <time> sits just above
+        # the action bar (localized so a quoted tweet's timestamp is ignored).
+        for t_top, t_bottom in tops("time"):
+            if t_bottom <= cut + 4 and (cut - t_top) < _METADATA_LOOKBACK:
+                cut = min(cut, t_top)
 
     height = max(cut - frame_top - _TOP_PAD, 80)
     return {"x": frame_x, "y": frame_top, "width": frame_w, "height": height}
@@ -582,8 +606,11 @@ def _screenshot_clip(page, clip, shot_path) -> None:
     page.screenshot(path=str(shot_path), clip=doc_clip, full_page=True)
 
 
-def capture(page, url: str, shot_path: Path) -> dict:
-    """Capture one X post. Returns a result dict; never raises for content issues."""
+def capture(page, url: str, shot_path: Path, keep_engagement: bool = False) -> dict:
+    """Capture one X post. Returns a result dict; never raises for content issues.
+
+    `keep_engagement` keeps every captured post's like/views line in the frame
+    (see the module docstring); the default crops them all out."""
     result = {"url": url, "status": "ok", "handle": "", "screenshot": None,
               "text": "", "overlay": False, "frame_ok": True}
 
@@ -631,11 +658,14 @@ def capture(page, url: str, shot_path: Path) -> dict:
         # settles, which brings back both a parent's action bar and any sheet.
         overlays.dismiss(page)
         overlays.hide_media_controls(page)   # the "Hide" toggle sits ON the media
-        _hide_ancestor_engagement(page, first, idx)
+        if not keep_engagement:
+            # Kept, the parent's bar is the whole point of the wider crop; the
+            # frame is then parent + its counts -> reply + its counts.
+            _hide_ancestor_engagement(page, first, idx)
         if top_el is not None:
             _hide_sticky_chrome(page)      # or the "← Post" bar covers the parent
             _align_top(page, top_el)
-        clip = _crop_box(page, tweet, top_el)
+        clip = _crop_box(page, tweet, top_el, keep_engagement)
         covers = _frame_covers(clip, tweet, top_el)
         try:
             if clip:

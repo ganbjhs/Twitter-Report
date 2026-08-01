@@ -16,18 +16,20 @@ file explains *what will bite you*.
 existed. **Invoke them; do not rewrite them.**
 
 `src/` was byte-for-byte identical to its originally tested state until the
-capture-quality work below. `input_loader.py`, `report_builder.py`, `_worker.py`,
+capture-quality work below. `input_loader.py`, `report_builder.py`,
 `platforms.py` and `save_sessions.py` still are; check what you are about to
 touch:
 
 ```bash
 git diff <first-commit> -- run.py src/ install.py requirements.txt
 # expected: run.py, src/overlays.py, src/capture/x_capture.py,
-#           src/shot_quality.py, src/run_report.py
+#           src/capture/__init__.py, src/shot_quality.py, src/run_report.py,
+#           src/_worker.py
 ```
 
-(A two-line change lived in `src/_worker.py` while the browser ran off-box. It
-was approved at the time and has since been reverted.)
+(An earlier two-line change to `src/_worker.py`, from when the browser ran
+off-box, was approved at the time and has since been reverted. The line there
+now is approved edit 4's.)
 
 **Approved edit 1 — `src/capture/x_capture.py` shoots a reply together with its
 parent**: parent name/@handle + text + media, then the reply's text and media,
@@ -43,6 +45,18 @@ its callers in both captures, `shot_quality.py` and `run_report.py`). Same
 argument: a dialog has to be taken off the page *before* the shutter, and only
 the capture holds the page. See rule 19 for what it fixes and why it is one bug,
 not two.
+
+**Approved edit 4 — `--keep-engagement`** (`src/capture/x_capture.py`,
+`src/capture/__init__.py`, `src/_worker.py`, `src/run_report.py`; `run.py` only
+in its docstring, since an unknown `--flag` already falls through to the
+runner). Other reports now need the counts *in* the picture, so the crop is a
+choice instead of a constant: the cut moves below the focused post's action bar
+and ancestors keep theirs, giving `parent + like/views -> comment + like/views`.
+This cannot be done from outside `src/` — the pixels below the cut never exist
+in the PNG, and the clip is chosen inside the capture. Additive and default-off:
+without the switch, `_crop_box` runs the same branch it always did and the
+picture is unchanged. The flag rides on the task dict, so `run_chunk`'s pickled
+signature did not move.
 
 **Approved edit 3 — `run.py --no-date`** (mirrored in
 `influencer/run_influencer.py`). The web app needs the document header to read

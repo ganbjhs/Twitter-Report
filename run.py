@@ -7,6 +7,7 @@
     python run.py --date 25-07-26            # date shown in the report header (dd-mm-yy)
     python run.py --title "Twitter Report"   # header label (default: "Twitter Report")
     python run.py --no-date                  # header is the title alone, no date
+    python run.py --keep-engagement          # keep the like/views line in the shot
     python run.py --headed                   # watch the browser
 
 The report header reads "<title> <date>", e.g. "Twitter Report 25-07-26"; the
@@ -14,6 +15,12 @@ date defaults to today (dd-mm-yy) when --date is omitted. With --no-date the
 header and the output file name are the title VERBATIM and nothing else, which
 is what the web app asks for: whatever the user typed as the report name is
 exactly what appears at the top of the document.
+
+Screenshots are cropped above the engagement bar by default. `--keep-engagement`
+crops below it instead, so the "time · views" line and the reply/repost/like
+counts stay in the picture — on a comment link, the parent's line and the
+comment's own. The switch is not consumed here: it falls through to
+src/run_report.py, which is where capture options belong.
 
 Under the hood this runs the capture + verification pass (src/run_report.py)
 and then the report builder (src/report_builder.py), writing the .pdf and .docx

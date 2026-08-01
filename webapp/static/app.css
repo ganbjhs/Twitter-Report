@@ -193,6 +193,20 @@ button, .as-button {
   box-shadow: 0 0 0 3px rgba(29,155,240,.2);
 }
 
+/* ---------- capture options (a real tick box, not a card) ---------- */
+.toggle {
+  display: grid; grid-template-columns: auto 1fr; gap: 10px;
+  align-items: start; cursor: pointer;
+  padding: 12px 14px; border: 1.5px solid var(--border);
+  border-radius: var(--radius); background: var(--bg);
+  transition: border-color .15s, background .15s;
+}
+.toggle input { width: 16px; height: 16px; margin-top: 2px; accent-color: var(--accent); }
+.toggle:has(input:checked) { border-color: var(--accent); background: rgba(29,155,240,.07); }
+.toggle:has(input:focus-visible) { box-shadow: 0 0 0 3px rgba(29,155,240,.2); }
+.toggle-body { display: grid; gap: 3px; }
+.toggle-body small { color: var(--muted); font-size: .82rem; line-height: 1.45; }
+
 /* ---------- alerts ---------- */
 .alert {
   padding: 11px 14px; border-radius: 9px; font-size: .88rem;

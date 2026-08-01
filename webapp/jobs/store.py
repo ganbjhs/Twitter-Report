@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     done          INTEGER DEFAULT 0,
     link_count    INTEGER DEFAULT 0,
     upload_name   TEXT DEFAULT '',
+    keep_engagement INTEGER DEFAULT 0,
     error         TEXT DEFAULT '',
     artifacts     TEXT DEFAULT '{}',
     skipped       TEXT DEFAULT '[]',
@@ -48,6 +49,11 @@ CREATE INDEX IF NOT EXISTS login_attempts_ip_ts ON login_attempts (ip, ts);
 
 _JSON_FIELDS = ("artifacts", "skipped", "activity")
 
+# Columns added after the first release. `CREATE TABLE IF NOT EXISTS` is a no-op
+# on a database that already has the table, so a new column has to be ALTERed in
+# or every query against an existing deployment's DB fails.
+_ADDED_COLUMNS = (("keep_engagement", "INTEGER DEFAULT 0"),)
+
 
 def _connect():
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -62,6 +68,10 @@ def init() -> None:
     """Create the schema and clear out any job left 'running' by a crash."""
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        have = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
+        for name, decl in _ADDED_COLUMNS:
+            if name not in have:
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {decl}")
         # A restart kills any capture that was in flight. Free hosts restart on
         # their own (rebuilds, idle sleep), so say plainly what to do next.
         conn.execute(
@@ -86,15 +96,16 @@ def _row_to_dict(row) -> dict:
 # Jobs
 # --------------------------------------------------------------------------- #
 def create(owner: str, name: str, title: str, report_type: str,
-           link_count: int, upload_name: str) -> str:
+           link_count: int, upload_name: str,
+           keep_engagement: bool = False) -> str:
     job_id = uuid.uuid4().hex[:16]
     with _connect() as conn:
         conn.execute(
             "INSERT INTO jobs (id, owner, name, title, report_type, status, "
-            "phase, link_count, upload_name, total, created_at) "
-            "VALUES (?,?,?,?,?,'queued','Waiting for a free capture slot',?,?,?,?)",
+            "phase, link_count, upload_name, total, keep_engagement, created_at) "
+            "VALUES (?,?,?,?,?,'queued','Waiting for a free capture slot',?,?,?,?,?)",
             (job_id, owner, name, title, report_type, link_count, upload_name,
-             link_count, time.time()))
+             link_count, int(bool(keep_engagement)), time.time()))
     return job_id
 
 
