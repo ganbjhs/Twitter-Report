@@ -120,7 +120,7 @@ def build_job_dir(job_id: str, rows: list, upload_bytes: bytes,
 # Command
 # --------------------------------------------------------------------------- #
 def build_command(report_type: str, title: str, date: str,
-                  keep_engagement: bool = False) -> list:
+                  keep_engagement: bool = False, workers: int = 0) -> list:
     """The exact CLI invocation, identical in shape to what you run by hand.
 
     `--no-date` is what makes the document header read exactly what the user
@@ -131,10 +131,25 @@ def build_command(report_type: str, title: str, date: str,
     `--keep-engagement` is Twitter-only: the influencer capture already keeps
     likes and reposts in frame, so the switch would be meaningless there and is
     never passed to it.
+
+    `workers` is the per-job capture speed, and like `--keep-engagement` it is
+    Twitter-only. The influencer report keeps its INFLUENCER_WORKERS default
+    whatever the form said: its follower-count cache lives in the worker
+    PROCESS, so a second worker re-fetches the same profiles — more browsers
+    there buy X more requests for the same data, not a faster report.
+
+    0 falls back to the server default for the report type. The value is clamped
+    to MAX_WORKERS here as well as at the API boundary, because this function is
+    also reachable from a stored job record, and one browser too many is an OOM
+    kill, not an error message.
     """
     influencer = report_type != "twitter"
     entry = str(Path("influencer") / "run_influencer.py") if influencer else "run.py"
-    workers = config.INFLUENCER_WORKERS if influencer else config.CAPTURE_WORKERS
+    if influencer:
+        workers = config.INFLUENCER_WORKERS
+    else:
+        workers = (min(workers, config.MAX_WORKERS) if workers > 0
+                   else config.CAPTURE_WORKERS)
     cmd = [sys.executable, "-u", entry, "input.xlsx",
            "--title", title,
            "--date", date,
@@ -406,13 +421,22 @@ def run_job(job_id: str, on_line=None) -> dict:
     stem = job["name"]
     date = datetime.date.today().strftime("%d-%m-%y")
     keep_engagement = bool(job.get("keep_engagement"))
-    cmd = build_command(job["report_type"], job["title"], date, keep_engagement)
+    cmd = build_command(job["report_type"], job["title"], date, keep_engagement,
+                        int(job.get("workers") or 0))
 
     store.update(job_id, status="running", started_at=time.time(),
                  phase="Checking the X login", error="")
     prog = _Progress(job_id, job.get("total") or job.get("link_count") or 0)
     prog.note(f"Job started — {job['report_type']} report, "
               f"{job.get('link_count', 0)} link(s).")
+    chosen = int(job.get("workers") or 0)
+    if chosen and job["report_type"] == "twitter":
+        capped = min(chosen, config.MAX_WORKERS)
+        # "up to": the pipeline also caps workers at the number of links, so a
+        # 4-browser choice on 2 links really runs 2.
+        prog.note(f"Capturing with up to {capped} browser(s)" +
+                  (f" — {chosen} was above this server's limit of "
+                   f"{config.MAX_WORKERS}." if capped < chosen else "."))
     if keep_engagement and job["report_type"] == "twitter":
         prog.note("Screenshots will keep the engagement line (replies, reposts, "
                   "likes, views) — on a comment link, the parent's line and the "

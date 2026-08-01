@@ -193,6 +193,23 @@ button, .as-button {
   box-shadow: 0 0 0 3px rgba(29,155,240,.2);
 }
 
+/* Matches the text inputs above, with a chevron drawn in place of the OS one so
+   it looks the same in both colour schemes. */
+select {
+  width: 100%; padding: 10px 34px 10px 12px; font: inherit;
+  color: var(--text); background-color: var(--bg);
+  border: 1px solid var(--border); border-radius: 9px;
+  appearance: none; cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%2364748b' stroke-width='1.6' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center;
+  background-size: 11px;
+}
+select:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(29,155,240,.18);
+}
+
 /* ---------- capture options (a real tick box, not a card) ---------- */
 .toggle {
   display: grid; grid-template-columns: auto 1fr; gap: 10px;

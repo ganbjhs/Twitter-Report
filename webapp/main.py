@@ -151,6 +151,8 @@ async def index(request: Request, user: str = Depends(auth.require_user)):
         {"user": user, "csrf": auth.csrf_token(request), "jobs": jobs,
          "max_links": config.MAX_LINKS, "max_mb": config.MAX_UPLOAD_MB,
          "accept": ",".join(uploads.ALLOWED_SUFFIXES),
+         "default_workers": config.CAPTURE_WORKERS,
+         "max_workers": config.MAX_WORKERS,
          "x_login_ok": config.X_STATE_FILE.exists()})
 
 

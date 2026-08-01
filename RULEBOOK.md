@@ -296,15 +296,31 @@ status source that is always right.
 
 ---
 
-## 12. Concurrency is bounded by RAM
+## 12. Concurrency is bounded by RAM — and by CORES
 
-Total simultaneous browsers = `MAX_CONCURRENT_JOBS × WORKERS`, and each browser
-is ~0.5–1 GB. Overshoot and the kernel kills a job mid-run.
+Worst-case simultaneous browsers = `MAX_CONCURRENT_JOBS × MAX_WORKERS` — not
+`× WORKERS`, because the form's per-job picker can ask for more than the default
+— and each browser is ~0.5–1 GB. Overshoot and the kernel kills a job mid-run.
+
+**Cores bound the speed-up; RAM bounds the crash.** Capture is CPU-heavy — each
+worker decodes that post's images and video — so browsers only run in parallel
+if there are cores to run them on. On a 1-vCPU box, three workers take turns on
+one core: the wall-clock barely moves while the memory cost is real and
+immediate. "It finished in minutes" comes from adding vCPUs, not from raising
+`WORKERS` on the same box.
+
+The form's **Capture speed** picker is per job and clamped to `MAX_WORKERS` in
+two places — `routes_jobs.submit_job` and `build_command` — because the second
+is also reachable from a stored job record, and the failure mode of one browser
+too many is an OOM kill rather than a validation error. Set `MAX_WORKERS` to
+roughly the vCPU count.
 
 * The **Influencer report uses one worker** (`INFLUENCER_WORKERS=1`). Its
   follower-count cache lives in the worker *process*, so a second worker
   re-fetches the same profiles. Raise it only if your lists rarely repeat an
-  account.
+  account. The form's Capture speed picker deliberately does **not** apply here
+  — it is hidden for this report type and ignored in `build_command` even if a
+  crafted POST supplies it, so this invariant holds no matter what the UI does.
 * `shm_size: "1gb"` in `docker-compose.yml` is not optional. Docker's default
   64 MB of shared memory makes Chromium crash on media-heavy posts.
 * **Bind mounts inherit HOST ownership, not the image's.** The Dockerfile

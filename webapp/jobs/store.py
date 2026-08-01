@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     link_count    INTEGER DEFAULT 0,
     upload_name   TEXT DEFAULT '',
     keep_engagement INTEGER DEFAULT 0,
+    workers       INTEGER DEFAULT 0,
     error         TEXT DEFAULT '',
     artifacts     TEXT DEFAULT '{}',
     skipped       TEXT DEFAULT '[]',
@@ -52,7 +53,8 @@ _JSON_FIELDS = ("artifacts", "skipped", "activity")
 # Columns added after the first release. `CREATE TABLE IF NOT EXISTS` is a no-op
 # on a database that already has the table, so a new column has to be ALTERed in
 # or every query against an existing deployment's DB fails.
-_ADDED_COLUMNS = (("keep_engagement", "INTEGER DEFAULT 0"),)
+_ADDED_COLUMNS = (("keep_engagement", "INTEGER DEFAULT 0"),
+                  ("workers", "INTEGER DEFAULT 0"))     # 0 = the server default
 
 
 def _connect():
@@ -70,8 +72,14 @@ def init() -> None:
         conn.executescript(_SCHEMA)
         have = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
         for name, decl in _ADDED_COLUMNS:
-            if name not in have:
+            if name in have:
+                continue
+            try:
                 conn.execute(f"ALTER TABLE jobs ADD COLUMN {name} {decl}")
+            except sqlite3.OperationalError:
+                # Another process added it between the PRAGMA and here. Harmless
+                # — the column exists either way, which is all we needed.
+                pass
         # A restart kills any capture that was in flight. Free hosts restart on
         # their own (rebuilds, idle sleep), so say plainly what to do next.
         conn.execute(
@@ -97,15 +105,18 @@ def _row_to_dict(row) -> dict:
 # --------------------------------------------------------------------------- #
 def create(owner: str, name: str, title: str, report_type: str,
            link_count: int, upload_name: str,
-           keep_engagement: bool = False) -> str:
+           keep_engagement: bool = False, workers: int = 0) -> str:
+    """`workers` = browsers to capture with; 0 means "use the server default"."""
     job_id = uuid.uuid4().hex[:16]
     with _connect() as conn:
         conn.execute(
             "INSERT INTO jobs (id, owner, name, title, report_type, status, "
-            "phase, link_count, upload_name, total, keep_engagement, created_at) "
-            "VALUES (?,?,?,?,?,'queued','Waiting for a free capture slot',?,?,?,?,?)",
+            "phase, link_count, upload_name, total, keep_engagement, workers, "
+            "created_at) "
+            "VALUES (?,?,?,?,?,'queued','Waiting for a free capture slot',?,?,?,?,?,?)",
             (job_id, owner, name, title, report_type, link_count, upload_name,
-             link_count, int(bool(keep_engagement)), time.time()))
+             link_count, int(bool(keep_engagement)), max(0, int(workers)),
+             time.time()))
     return job_id
 
 

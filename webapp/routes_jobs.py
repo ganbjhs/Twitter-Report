@@ -43,6 +43,7 @@ def public_job(job: dict) -> dict:
         "title": job["title"],
         "report_type": job["report_type"],
         "keep_engagement": bool(job.get("keep_engagement")),
+        "workers": job.get("workers") or 0,
         "status": job["status"],
         "phase": job.get("phase") or "",
         "done": done,
@@ -98,6 +99,7 @@ async def submit_job(request: Request,
                      report_type: str = Form(...),
                      csrf_token: str = Form(...),
                      keep_engagement: str = Form(""),
+                     workers: str = Form(""),
                      user: str = Depends(auth.require_user_api)):
     auth.verify_csrf(request, csrf_token)
 
@@ -109,6 +111,17 @@ async def submit_job(request: Request,
     # engagement line, so accepting it there would promise a choice that isn't one.
     keep = report_type == "twitter" and keep_engagement.lower() not in ("", "0",
                                                                         "false", "off")
+
+    # Capture speed. Clamped, never trusted: each browser is ~0.5-1 GB, so a
+    # hand-crafted POST asking for 50 would be an out-of-memory kill rather than
+    # a fast report. Anything unparseable means "server default". Twitter-only,
+    # for the same reason as the crop tick — see build_command.
+    try:
+        want_workers = int(workers)
+    except ValueError:
+        want_workers = 0
+    want_workers = (max(0, min(want_workers, config.MAX_WORKERS))
+                    if report_type == "twitter" else 0)
 
     try:
         suffix = uploads.suffix_of(file.filename)
@@ -139,7 +152,8 @@ async def submit_job(request: Request,
 
     job_id = store.create(owner=user, name=stem, title=title,
                           report_type=report_type, link_count=len(rows),
-                          upload_name=upload_name, keep_engagement=keep)
+                          upload_name=upload_name, keep_engagement=keep,
+                          workers=want_workers)
     try:
         await asyncio.to_thread(runner.build_job_dir, job_id, rows, raw, upload_name)
     except Exception as e:

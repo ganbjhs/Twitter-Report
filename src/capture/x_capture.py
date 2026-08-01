@@ -316,6 +316,32 @@ def _align_top(page, locator) -> None:
 # could not be read and the article had to be chosen by scoring.
 _IS_REPLY = """el => /(^|\\n)\\s*Replying to/.test(el.innerText || '')"""
 
+# JS: the top of the nearest thing painted BELOW the action bar, or null when the
+# bar is the last thing in the post. X puts its "Relevant people" block INSIDE
+# the article, a couple of px under the bar, so the article's own bottom edge is
+# useless as a limit — clamping to it still lets a line of that block into the
+# frame. This gives the real floor.
+_NEXT_BELOW = """(el, barBottom) => {
+  let top = Infinity;
+  for (const n of el.querySelectorAll('*')) {
+    const r = n.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0 && r.top >= barBottom - 1) {
+      top = Math.min(top, r.top);
+    }
+  }
+  return Number.isFinite(top) ? top : null;
+}"""
+
+
+def _floor_below(tweet, bar_bottom: float, fallback: float) -> float:
+    """How far below the action bar the crop may reach without clipping the
+    next block. Falls back to the article's bottom when nothing follows."""
+    try:
+        top = tweet.evaluate(_NEXT_BELOW, bar_bottom)
+    except Exception:
+        top = None
+    return min(fallback, top) if top is not None else fallback
+
 
 def _is_reply(locator) -> bool:
     try:
@@ -571,8 +597,12 @@ def _crop_box(page, tweet, top_el=None, keep_engagement=False):
     if keep_engagement:
         # Below the bar. The metadata/counts line needs no special handling —
         # it sits above the bar, so it is already inside the frame.
-        cut = max((b for _, b in groups), default=art_bottom) + _BOTTOM_PAD
-        cut = min(cut, art_bottom)           # never spill past the article
+        bar_bottom = max((b for _, b in groups), default=art_bottom)
+        # The pad is a courtesy, not a promise: give it up rather than clip the
+        # "Relevant people" block X paints a few px under the bar.
+        cut = min(bar_bottom + _BOTTOM_PAD,
+                  _floor_below(tweet, bar_bottom, art_bottom))
+        cut = max(cut, bar_bottom)           # never eat into the bar itself
     else:
         cut = min((t for t, _ in groups), default=art_bottom)
 

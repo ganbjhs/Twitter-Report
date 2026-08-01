@@ -85,6 +85,34 @@ The tick is off by default and only exists for the Twitter report — the
 influencer capture already keeps engagement in frame, so the option is hidden
 when that type is selected.
 
+### Capture speed (how many browsers)
+
+The Twitter report's form has a **Capture speed** picker: how many Chromium
+workers capture the batch in parallel. Leave it on *Server default* (`WORKERS`
+in `.env`) unless a batch is unusually large. The picker stops at `MAX_WORKERS`,
+and the server clamps anything above that — the limit is not decoration, each
+browser is 0.5–1 GB and an overshoot is an out-of-memory kill, not an error
+message.
+
+Like the crop tick, the picker is **Twitter-only** and hidden for the Influencer
+report, which stays pinned to `INFLUENCER_WORKERS` (see the table below for
+why).
+
+**More browsers only help if there are spare CPU cores.** Chromium spends the
+capture decoding each post's images and video, so on a 1-vCPU server three
+browsers take turns on one core: same wall-clock, triple the memory. Set
+`MAX_WORKERS` to roughly your vCPU count, and measure before raising it:
+
+```bash
+nproc                                   # cores you actually have
+free -g                                 # free RAM
+docker stats --no-stream                # what a running capture costs
+```
+
+Two other ceilings worth knowing: workers are capped at the number of links
+(8 workers on 5 links runs 5 browsers), and every worker signs in as the *same*
+X account — push it hard enough and you trade speed for rate-limit retries.
+
 ---
 
 ## How it works
@@ -226,9 +254,10 @@ Everything is environment variables, loaded from `.env` locally. See
 
 | Variable | Default | Notes |
 |---|---|---|
-| `WORKERS` | `3` | Browsers per job. One per 1–1.5 GB of free RAM. |
-| `MAX_CONCURRENT_JOBS` | `1` | Total browsers = this × `WORKERS`. |
-| `INFLUENCER_WORKERS` | `1` | Browsers for the Influencer report. Its follower-count cache is per worker process, so extra workers re-fetch the same profiles. |
+| `WORKERS` | `3` | Browsers per job, when nobody picks. One per 1–1.5 GB of free RAM. |
+| `MAX_WORKERS` | `4` | Ceiling for the form's Capture speed picker (Twitter only). Match it to vCPUs. |
+| `MAX_CONCURRENT_JOBS` | `1` | Worst-case total browsers = this × `MAX_WORKERS`, since a job may pick above `WORKERS`. |
+| `INFLUENCER_WORKERS` | `1` | Browsers for the Influencer report, always — the picker cannot override it. Its follower-count cache is per worker process, so extra workers re-fetch the same profiles. |
 | `EXECUTION_MODE` | `queue` | Background workers. `inline` exists only for hosts that stop the CPU after a response. |
 | `MAX_LINKS` | `200` | Per job. |
 | `MAX_UPLOAD_MB` | `5` | |

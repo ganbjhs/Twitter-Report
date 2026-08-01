@@ -13,18 +13,22 @@ function initSubmitForm() {
   const spinner = submitBtn.querySelector(".spinner");
   const cropOption = document.getElementById("crop-option");
   const keepEngagement = document.getElementById("keep-engagement");
+  const speedOption = document.getElementById("speed-option");
+  const workersSelect = document.getElementById("workers");
 
-  // The influencer capture always keeps likes and reposts in frame, so the
-  // choice only exists for the Twitter report — hide it rather than show a
-  // tick that would do nothing.
-  const syncCropOption = () => {
-    if (!cropOption) return;
-    cropOption.hidden = form.report_type.value !== "twitter";
+  // Both capture options are Twitter-only, for different reasons: the influencer
+  // capture already keeps likes and reposts in frame, and it pins itself to
+  // INFLUENCER_WORKERS because its follower cache lives per worker process.
+  // Hide them rather than offer controls that would do nothing.
+  const syncTwitterOptions = () => {
+    const twitter = form.report_type.value === "twitter";
+    if (cropOption) cropOption.hidden = !twitter;
+    if (speedOption) speedOption.hidden = !twitter;
   };
   form.querySelectorAll('input[name="report_type"]').forEach((radio) =>
-    radio.addEventListener("change", syncCropOption)
+    radio.addEventListener("change", syncTwitterOptions)
   );
-  syncCropOption();
+  syncTwitterOptions();
 
   const showError = (msg) => {
     errorBox.textContent = msg;
@@ -91,6 +95,7 @@ function initSubmitForm() {
     if (keepEngagement && keepEngagement.checked && form.report_type.value === "twitter") {
       body.append("keep_engagement", "1");
     }
+    if (workersSelect && workersSelect.value) body.append("workers", workersSelect.value);
 
     try {
       const res = await fetch("/api/jobs", { method: "POST", body });

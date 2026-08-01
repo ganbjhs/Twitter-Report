@@ -116,6 +116,17 @@ COOKIE_SECURE = _bool("COOKIE_SECURE", False)
 MAX_CONCURRENT_JOBS = max(1, _int("MAX_CONCURRENT_JOBS", 1))
 CAPTURE_WORKERS = max(1, _int("WORKERS", _int("CAPTURE_WORKERS", 3)))
 
+# Ceiling for the per-job "Capture speed" picker on the submit form. A user can
+# choose any value up to this; the server clamps anything above it.
+#
+# Keep it honest about the hardware. Browsers only run in parallel if there are
+# CORES to run them on — Chromium spends the capture decoding images and video,
+# so on a 1-vCPU box three browsers take turns on one core instead of running
+# side by side, and the wall-clock barely moves while the RAM cost is real.
+# Raise this when you add vCPUs, not before. RAM is the second limit:
+# MAX_CONCURRENT_JOBS x MAX_WORKERS browsers at ~0.5-1 GB each.
+MAX_WORKERS = max(CAPTURE_WORKERS, _int("MAX_WORKERS", 4))
+
 # The Influencer report defaults to one browser: it looks up each author's
 # follower count once and caches it, but that cache lives in the worker PROCESS,
 # so a second worker re-fetches the same profiles. Raise it if you have the
